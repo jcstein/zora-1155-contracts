@@ -102,10 +102,12 @@ contract ZoraSignatureMinterStrategy is Enjoy, SaleStrategy, LimitedMintPerAddre
 
         address signer = _recover(target, uid, tokenId, quantity, pricePerToken, expiration, mintTo, signature);
 
+        // do we need this setting to be there for each token, or just be the same across the board?
         if (!isAuthorizedToSign(signer, target, tokenId)) {
             revert("Non-authorized signer");
         }
 
+        // do we need this to be also unique per signer?
         if (minted[target][uid]) {
             revert("Minted");
         }
@@ -128,22 +130,6 @@ contract ZoraSignatureMinterStrategy is Enjoy, SaleStrategy, LimitedMintPerAddre
         return signatureSaleSettings[target][tokenId].authorizedSignatureCreators.isAuthorized(signer);
     }
 
-    // function signMint(address target, uint256 nonce, uint256 tokenId, uint256 quantity, uint256 pricePerToken, uint256 expiration, address mintTo) external {
-    //     // nonce must increment for each target contract address
-    //     require(nonce == nonces[target]++, "Comp::delegateBySig: invalid nonce");
-
-    //     // signer must be authorized to create hash signed mint
-    //     bool isAuthorized = signatureSaleSettings[target][tokenId].authorizedSignatureCreators.isAuthorized(msg.sender);
-
-    //     // now has the mint instructions, and store the mint
-    //     if (!isAuthorized) revert("Cannot sign");
-
-    //     // generate a hash from the mint parameters
-    //     uint256 signedMintHash = _hashSignedMint(msg.sender, nonce, tokenId, quantity, pricePerToken, expiration, mintTo);
-    //     // mark that its a valid signed mint
-    //     signedMints[target][signedMintHash].valid = true;
-    // }
-
     function _executeMintAndTransferFunds(
         address target,
         uint256 tokenId,
@@ -164,18 +150,6 @@ contract ZoraSignatureMinterStrategy is Enjoy, SaleStrategy, LimitedMintPerAddre
         if (shouldTransferFunds) {
             commands.transfer(fundsRecipient, ethValueSent);
         }
-    }
-
-    function _hashSignedMint(
-        address signer,
-        uint256 nonce,
-        uint256 tokenId,
-        uint256 quantity,
-        uint256 pricePerToken,
-        uint256 expiration,
-        address mintTo
-    ) private pure returns (uint256) {
-        return uint256(keccak256(abi.encode(signer, nonce, tokenId, quantity, pricePerToken, expiration, mintTo)));
     }
 
     function _recover(
