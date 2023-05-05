@@ -36,7 +36,7 @@ import {LimitedMintPerAddress} from "../utils/LimitedMintPerAddress.sol";
  */
 
 interface IAuthRegistry {
-    function isAuthorized(address account) external returns (bool);
+    function isAuthorized(address account) external view returns (bool);
 }
 
 /// @title ZoraSignatureMinterStrategy
@@ -52,17 +52,10 @@ contract ZoraSignatureMinterStrategy is Enjoy, SaleStrategy, LimitedMintPerAddre
         address fundsRecipient;
     }
 
-    struct SignedMint {
-        bool valid;
-        bool executed;
-    }
-
     // target -> tokenId -> settings
     mapping(address => mapping(uint256 => SignatureSaleSettings)) signatureSaleSettings;
-    // target -> nonce
-    mapping(address => uint256) nonces;
-    // target -> hash -> signed mints
-    mapping(address => mapping(uint256 => SignedMint)) public signedMints;
+    // target contract -> unique nonce -> if has been minted already
+    mapping(address => mapping(bytes32 => bool)) private minted;
 
     /// @notice Event for sale configuration updated
     event SaleSet(address indexed mediaContract, uint256 indexed tokenId, SignatureSaleSettings signatureSaleSettings);
@@ -102,25 +95,26 @@ contract ZoraSignatureMinterStrategy is Enjoy, SaleStrategy, LimitedMintPerAddre
         bytes calldata minterArguments
     ) external returns (ICreatorCommands.CommandSet memory) {
         address target = msg.sender;
-        (address signer, uint256 nonce, uint256 pricePerToken, uint256 expiration, address mintTo) = abi.decode(
+        (uint256 pricePerToken, uint256 expiration, address mintTo, bytes32 uid, bytes memory signature) = abi.decode(
             minterArguments,
-            (address, uint256, uint256, uint256, address)
+            (uint256, uint256, address, bytes32, bytes)
         );
+
+        address signer = _recover(target, uid, tokenId, quantity, pricePerToken, expiration, mintTo, signature);
+
+        if (!isAuthorizedToSign(signer, target, tokenId)) {
+            revert("Non-authorized signer");
+        }
+
+        if (minted[target][uid]) {
+            revert("Minted");
+        }
+        minted[target][uid] = true;
 
         // validate that the mint hasn't expired
         if (block.timestamp > expiration) {
             revert("Expired");
         }
-
-        // generate unique hash from the parameters
-        uint256 signedMintHash = _hashSignedMint(signer, nonce, tokenId, quantity, pricePerToken, expiration, mintTo);
-
-        SignedMint storage signedMint = signedMints[target][signedMintHash];
-        // check that hash is valid give the target address
-        if (!signedMint.valid) revert("Invalid signed mint");
-        // check and set that signed mint is used
-        if (signedMint.executed) revert("Executed");
-        signedMint.executed = true;
 
         // validate that proper value was sent
         if (quantity * pricePerToken != ethValueSent) {
@@ -130,21 +124,25 @@ contract ZoraSignatureMinterStrategy is Enjoy, SaleStrategy, LimitedMintPerAddre
         return _executeMintAndTransferFunds(target, tokenId, quantity, mintTo, ethValueSent);
     }
 
-    function signMint(address target, uint256 nonce, uint256 tokenId, uint256 quantity, uint256 pricePerToken, uint256 expiration, address mintTo) external {
-        // nonce must increment for each target contract address
-        require(nonce == nonces[target]++, "Comp::delegateBySig: invalid nonce");
-
-        // signer must be authorized to create hash signed mint
-        bool isAuthorized = signatureSaleSettings[target][tokenId].authorizedSignatureCreators.isAuthorized(msg.sender);
-
-        // now has the mint instructions, and store the mint
-        if (!isAuthorized) revert("Cannot sign");
-
-        // generate a hash from the mint parameters
-        uint256 signedMintHash = _hashSignedMint(msg.sender, nonce, tokenId, quantity, pricePerToken, expiration, mintTo);
-        // mark that its a valid signed mint
-        signedMints[target][signedMintHash].valid = true;
+    function isAuthorizedToSign(address signer, address target, uint256 tokenId) public view returns (bool) {
+        return signatureSaleSettings[target][tokenId].authorizedSignatureCreators.isAuthorized(signer);
     }
+
+    // function signMint(address target, uint256 nonce, uint256 tokenId, uint256 quantity, uint256 pricePerToken, uint256 expiration, address mintTo) external {
+    //     // nonce must increment for each target contract address
+    //     require(nonce == nonces[target]++, "Comp::delegateBySig: invalid nonce");
+
+    //     // signer must be authorized to create hash signed mint
+    //     bool isAuthorized = signatureSaleSettings[target][tokenId].authorizedSignatureCreators.isAuthorized(msg.sender);
+
+    //     // now has the mint instructions, and store the mint
+    //     if (!isAuthorized) revert("Cannot sign");
+
+    //     // generate a hash from the mint parameters
+    //     uint256 signedMintHash = _hashSignedMint(msg.sender, nonce, tokenId, quantity, pricePerToken, expiration, mintTo);
+    //     // mark that its a valid signed mint
+    //     signedMints[target][signedMintHash].valid = true;
+    // }
 
     function _executeMintAndTransferFunds(
         address target,
@@ -179,6 +177,17 @@ contract ZoraSignatureMinterStrategy is Enjoy, SaleStrategy, LimitedMintPerAddre
     ) private pure returns (uint256) {
         return uint256(keccak256(abi.encode(signer, nonce, tokenId, quantity, pricePerToken, expiration, mintTo)));
     }
+
+    function _recover(
+        address target,
+        bytes32 uid,
+        uint256 tokenId,
+        uint256 quantity,
+        uint256 pricePerToken,
+        uint256 expiration,
+        address mintTo,
+        bytes memory signature
+    ) private pure returns (address) {}
 
     /// @notice Sets the sale configuration for a token
     function setSale(uint256 tokenId, SignatureSaleSettings calldata _signatureSaleSettings) external {
