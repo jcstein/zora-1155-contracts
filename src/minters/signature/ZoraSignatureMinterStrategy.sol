@@ -107,18 +107,18 @@ contract ZoraSignatureMinterStrategy is Enjoy, SaleStrategy, LimitedMintPerAddre
             (address, uint256, uint256, uint256, address)
         );
 
+        // validate that the mint hasn't expired
         if (block.timestamp > expiration) {
             revert("Expired");
         }
-        // recover signer address from the arguments
-        // see if recovered signer matches what was stored
-        if (signer == address(0)) revert("Invalid signature");
 
+        // generate unique hash from the parameters
         uint256 signedMintHash = _hashSignedMint(signer, nonce, tokenId, quantity, pricePerToken, expiration, mintTo);
 
         SignedMint storage signedMint = signedMints[target][signedMintHash];
-        // check and set that signed mint is used
+        // check that hash is valid give the target address
         if (!signedMint.valid) revert("Invalid signed mint");
+        // check and set that signed mint is used
         if (signedMint.executed) revert("Executed");
         signedMint.executed = true;
 
@@ -134,7 +134,7 @@ contract ZoraSignatureMinterStrategy is Enjoy, SaleStrategy, LimitedMintPerAddre
         // nonce must increment for each target contract address
         require(nonce == nonces[target]++, "Comp::delegateBySig: invalid nonce");
 
-        // signer must be authorized
+        // signer must be authorized to create hash signed mint
         bool isAuthorized = signatureSaleSettings[target][tokenId].authorizedSignatureCreators.isAuthorized(msg.sender);
 
         // now has the mint instructions, and store the mint
