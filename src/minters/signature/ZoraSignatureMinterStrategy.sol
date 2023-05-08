@@ -9,6 +9,8 @@ import {SaleStrategy} from "../SaleStrategy.sol";
 import {ICreatorCommands} from "../../interfaces/ICreatorCommands.sol";
 import {SaleCommandHelper} from "../utils/SaleCommandHelper.sol";
 import {LimitedMintPerAddress} from "../utils/LimitedMintPerAddress.sol";
+import {EIP712} from "@openzeppelin/contracts/utils/cryptography/EIP712.sol";
+import {ECDSA} from "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
 
 /*
 
@@ -40,30 +42,33 @@ interface IAuthRegistry {
 }
 
 /// @title ZoraSignatureMinterStrategy
-/// @notice Mints tokens based on a merkle tree, for presales for example
-/// @author @iainnash / @tbtstl
-contract ZoraSignatureMinterStrategy is Enjoy, SaleStrategy, LimitedMintPerAddress {
+/// @notice Mints tokens based on signature created by an authorized signer
+/// @author @oveddan
+contract ZoraSignatureMinterStrategy is Enjoy, SaleStrategy, LimitedMintPerAddress, EIP712 {
     using SaleCommandHelper for ICreatorCommands.CommandSet;
 
     /// @notice General signatue sale settings
-    struct SignatureSaleSettings {
+    struct SalesConfig {
         IAuthRegistry authorizedSignatureCreators;
         /// @notice Funds recipient (0 if no different funds recipient than the contract global)
         address fundsRecipient;
     }
 
     // target -> tokenId -> settings
-    mapping(address => mapping(uint256 => SignatureSaleSettings)) signatureSaleSettings;
+    mapping(address => mapping(uint256 => SalesConfig)) signatureSaleSettings;
     // target contract -> unique nonce -> if has been minted already
     mapping(address => mapping(bytes32 => bool)) private minted;
 
     /// @notice Event for sale configuration updated
-    event SaleSet(address indexed mediaContract, uint256 indexed tokenId, SignatureSaleSettings signatureSaleSettings);
+    event SaleSet(address indexed mediaContract, uint256 indexed tokenId, SalesConfig signatureSaleSettings);
 
     error SaleEnded();
     error SaleHasNotStarted();
     error WrongValueSent();
-    error InvalidSignature(address mintTo);
+    error InvalidSignature();
+
+    bytes32 constant REQUEST_MINT_TYPEHASH =
+        keccak256("requestMint(address target,uint256 tokenId,bytes32 uid,uint256 quantity,uint256 pricePerToken,uint256 expiration,address mintTo)");
 
     /// @notice ContractURI for contract information with the strategy
     function contractURI() external pure override returns (string memory) {
@@ -80,9 +85,12 @@ contract ZoraSignatureMinterStrategy is Enjoy, SaleStrategy, LimitedMintPerAddre
         return "1.0.0";
     }
 
+    constructor() EIP712("ZoraSignatureMinterStrategy", "1") {}
+
     error MerkleClaimsExceeded();
 
-    /// @notice Compiles and returns the commands needed to mint a token using this sales strategy
+    /// @notice Compiles and returns the commands needed to mint a token using this sales strategy.  Requires a signature
+    /// to have been created off-chain by an authorized signer.
     /// @param tokenId The token ID to mint
     /// @param quantity The quantity of tokens to mint
     /// @param ethValueSent The amount of ETH sent with the transaction
@@ -95,16 +103,17 @@ contract ZoraSignatureMinterStrategy is Enjoy, SaleStrategy, LimitedMintPerAddre
         bytes calldata minterArguments
     ) external returns (ICreatorCommands.CommandSet memory) {
         address target = msg.sender;
-        (uint256 pricePerToken, uint256 expiration, address mintTo, bytes32 uid, bytes memory signature) = abi.decode(
+        // these arguments are what don't fit into the standard requestMint Args
+        (bytes32 uid, uint256 pricePerToken, uint256 expiration, address mintTo, bytes memory signature) = abi.decode(
             minterArguments,
-            (uint256, uint256, address, bytes32, bytes)
+            (bytes32, uint256, uint256, address, bytes)
         );
 
-        address signer = _recover(target, uid, tokenId, quantity, pricePerToken, expiration, mintTo, signature);
+        address signer = _recover(target, tokenId, uid, quantity, pricePerToken, expiration, mintTo, signature);
 
         // do we need this setting to be there for each token, or just be the same across the board?
-        if (!isAuthorizedToSign(signer, target, tokenId)) {
-            revert("Non-authorized signer");
+        if (signer == address(0) || !isAuthorizedToSign(signer, target, tokenId)) {
+            revert InvalidSignature();
         }
 
         // do we need this to be also unique per signer?
@@ -124,6 +133,37 @@ contract ZoraSignatureMinterStrategy is Enjoy, SaleStrategy, LimitedMintPerAddre
         }
 
         return _executeMintAndTransferFunds(target, tokenId, quantity, mintTo, ethValueSent);
+    }
+
+    /// Used to create a hash of the data for the requestMint function,
+    /// that is to be signed by the authorized signer.
+    function delegateCreateContractHashTypeData(
+        address target,
+        uint256 tokenId,
+        bytes32 uid,
+        uint256 quantity,
+        uint256 pricePerToken,
+        uint256 expiration,
+        address mintTo
+    ) public view returns (bytes32) {
+        bytes32 structHash = keccak256(abi.encode(REQUEST_MINT_TYPEHASH, target, uid, tokenId, quantity, pricePerToken, expiration, mintTo));
+
+        return _hashTypedDataV4(structHash);
+    }
+
+    function _recover(
+        address target,
+        uint256 tokenId,
+        bytes32 uid,
+        uint256 quantity,
+        uint256 pricePerToken,
+        uint256 expiration,
+        address mintTo,
+        bytes memory signature
+    ) private view returns (address) {
+        bytes32 digest = delegateCreateContractHashTypeData(target, tokenId, uid, quantity, pricePerToken, expiration, mintTo);
+
+        return ECDSA.recover(digest, signature);
     }
 
     function isAuthorizedToSign(address signer, address target, uint256 tokenId) public view returns (bool) {
@@ -152,19 +192,8 @@ contract ZoraSignatureMinterStrategy is Enjoy, SaleStrategy, LimitedMintPerAddre
         }
     }
 
-    function _recover(
-        address target,
-        bytes32 uid,
-        uint256 tokenId,
-        uint256 quantity,
-        uint256 pricePerToken,
-        uint256 expiration,
-        address mintTo,
-        bytes memory signature
-    ) private pure returns (address) {}
-
-    /// @notice Sets the sale configuration for a token
-    function setSale(uint256 tokenId, SignatureSaleSettings calldata _signatureSaleSettings) external {
+    /// @notice Sets the sale configuration for a token.  Meant to be called from the erc1155 contract
+    function setSale(uint256 tokenId, SalesConfig calldata _signatureSaleSettings) external {
         signatureSaleSettings[msg.sender][tokenId] = _signatureSaleSettings;
 
         // Emit event for new sale
@@ -182,7 +211,7 @@ contract ZoraSignatureMinterStrategy is Enjoy, SaleStrategy, LimitedMintPerAddre
     /// @notice Gets the sale configuration for a token
     /// @param tokenContract address to look up sale for
     /// @param tokenId token ID to look up sale for
-    function sale(address tokenContract, uint256 tokenId) external view returns (SignatureSaleSettings memory) {
+    function sale(address tokenContract, uint256 tokenId) external view returns (SalesConfig memory) {
         return signatureSaleSettings[tokenContract][tokenId];
     }
 
