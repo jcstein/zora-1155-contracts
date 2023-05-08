@@ -271,31 +271,37 @@ contract ZoraSignatureMinterStategyTest is Test {
         // if non authorized signer, change private key to use to another private key thats not authorized
         uint256 privateKeyToUse = nonAuthorizedSigner ? 0xA11CD : authorizedSignerPrivateKey;
 
-        // create the signature from an authorized signer with the original correct data
-        bytes memory signature = _signMintRequest(privateKeyToUse, address(target), tokenId, randomBytes, quantity, pricePerToken, expiration, mintTo);
+        bytes memory signature;
+
+        {
+            // create the signature from an authorized signer with the original correct data
+            signature = _signMintRequest(privateKeyToUse, address(target), tokenId, randomBytes, quantity, pricePerToken, expiration, mintTo);
+        }
 
         // store the mint value before affecting price per token below
         uint256 mintValue = uint256(pricePerToken) * quantity;
 
-        // now start messing with the data
-        if (tokenIdWrong) {
-            tokenId = _setupTokenAndSignatureMinter(maxSupply);
-        }
-        if (quantityWrong) {
-            quantity = quantity + 1;
-        }
-        if (experitionWrong) {
-            expiration = expiration + 1;
-        }
-        if (mintToWrong) {
-            mintTo = vm.addr(123);
-        }
-        if (randomBytesWrong) {
-            // randomly alter bytes (by flipping them)
-            randomBytes = _flipBytes(randomBytes);
-        }
-        if (pricePerTokenWrong) {
-            pricePerToken = pricePerToken + 1;
+        {
+            // now start messing with the data
+            if (tokenIdWrong) {
+                tokenId = _setupTokenAndSignatureMinter(maxSupply);
+            }
+            if (quantityWrong) {
+                quantity = quantity + 1;
+            }
+            if (experitionWrong) {
+                expiration = expiration + 1;
+            }
+            if (mintToWrong) {
+                mintTo = vm.addr(123);
+            }
+            if (randomBytesWrong) {
+                // randomly alter bytes (by flipping them)
+                randomBytes = _flipBytes(randomBytes);
+            }
+            if (pricePerTokenWrong) {
+                pricePerToken = pricePerToken + 1;
+            }
         }
 
         // now build the calldata
