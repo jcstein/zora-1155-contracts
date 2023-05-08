@@ -407,21 +407,23 @@ contract ZoraSignatureMinterStategyTest is Test {
 
         address mintTo = vm.addr(123123123);
 
-        // sign a mint request with the original signer for the first token and execute it; it should succeed
-        (, bytes memory minterArguments, uint256 mintValue) = _signMintRequestAndGetMintParams(
-            authorizedSignerPrivateKey,
-            address(target),
-            firstTokenId,
-            randomBytes,
-            quantity,
-            pricePerToken,
-            expiration,
-            mintTo
-        );
-
+        bytes memory minterArguments;
+        uint256 mintValue;
         address executorAddress = vm.addr(12314324123);
 
+        // sign a mint request with the original signer for the first token and execute it; it should succeed
         {
+            (, minterArguments, mintValue) = _signMintRequestAndGetMintParams(
+                authorizedSignerPrivateKey,
+                address(target),
+                firstTokenId,
+                randomBytes,
+                quantity,
+                pricePerToken,
+                expiration,
+                mintTo
+            );
+
             vm.deal(executorAddress, mintValue);
             vm.prank(executorAddress);
 
