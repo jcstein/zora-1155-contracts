@@ -64,8 +64,10 @@ contract ZoraSignatureMinterStrategy is Enjoy, SaleStrategy, LimitedMintPerAddre
 
     error SaleEnded();
     error SaleHasNotStarted();
-    error WrongValueSent();
+    error WrongValueSent(uint256 expectedValue, uint256 valueSent);
     error InvalidSignature();
+    error AlreadyMinted();
+    error Expired(uint256 expiration);
 
     bytes32 constant REQUEST_MINT_TYPEHASH =
         keccak256("requestMint(address target,uint256 tokenId,bytes32 uid,uint256 quantity,uint256 pricePerToken,uint256 expiration,address mintTo)");
@@ -118,18 +120,18 @@ contract ZoraSignatureMinterStrategy is Enjoy, SaleStrategy, LimitedMintPerAddre
 
         // do we need this to be also unique per signer?
         if (minted[target][uid]) {
-            revert("Minted");
+            revert AlreadyMinted();
         }
         minted[target][uid] = true;
 
         // validate that the mint hasn't expired
         if (block.timestamp > expiration) {
-            revert("Expired");
+            revert Expired(expiration);
         }
 
         // validate that proper value was sent
         if (quantity * pricePerToken != ethValueSent) {
-            revert WrongValueSent();
+            revert WrongValueSent(quantity * pricePerToken, ethValueSent);
         }
 
         return _executeMintAndTransferFunds(target, tokenId, quantity, mintTo, ethValueSent);

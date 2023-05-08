@@ -102,6 +102,27 @@ contract ZoraSignatureMinterStategyTest is Test {
         return abi.encodePacked(r, s, v);
     }
 
+    function _signMintRequest(
+        uint256 signer,
+        address _target,
+        uint256 tokenId,
+        bytes32 randomBytes,
+        uint256 quantity,
+        uint256 pricePerToken,
+        uint256 expiration,
+        address mintTo
+    ) private view returns (bytes memory) {
+        bytes32 digest = signatureMinter.delegateCreateContractHashTypeData(_target, tokenId, randomBytes, quantity, pricePerToken, expiration, mintTo);
+
+        // generate signature for hash using creators private key
+        return _sign(signer, digest);
+    }
+
+    function _flipBytes(bytes32 toFlip) private pure returns (bytes32) {
+        bytes32 mask = 0x0000000000000000000000000000000000000000000000000000000000000001; // mask with the LSB flipped
+        return toFlip ^ mask; // XOR the original with the mask to flip the LSB
+    }
+
     function test_mint_succeedsWhen_ValidSignature(
         uint64 pricePerToken,
         uint64 quantity,
@@ -117,11 +138,17 @@ contract ZoraSignatureMinterStategyTest is Test {
 
         uint256 expiration = currentTime + expirationInFuture;
 
-        // create the signature from an authorized signer:
-        bytes32 digest = signatureMinter.delegateCreateContractHashTypeData(address(target), tokenId, randomBytes, quantity, pricePerToken, expiration, mintTo);
-
-        // generate signature for hash using creators private key
-        bytes memory signature = _sign(authorizedSignerPrivateKey, digest);
+        // generate signature for data using creators private key
+        bytes memory signature = _signMintRequest(
+            authorizedSignerPrivateKey,
+            address(target),
+            tokenId,
+            randomBytes,
+            quantity,
+            pricePerToken,
+            expiration,
+            mintTo
+        );
 
         // now build the calldata
         bytes memory minterArguments = abi.encode(randomBytes, pricePerToken, expiration, mintTo, signature);
@@ -136,6 +163,68 @@ contract ZoraSignatureMinterStategyTest is Test {
 
         // validate that the mintTo address has a balance of quantity for the token
         assertEq(target.balanceOf(mintTo, tokenId), quantity);
+    }
+
+    function test_mint_revertsWhen_mintedTwice_butSucceedsWhen_randomBytesChanges(
+        uint64 pricePerToken,
+        uint64 quantity,
+        uint64 maxSupply,
+        uint64 expirationInFuture,
+        bytes32 randomBytes
+    ) external {
+        vm.assume(quantity > 0);
+        // since we will mint twicek
+        vm.assume(maxSupply >= uint256(quantity) * 2);
+        vm.assume(expirationInFuture > 0);
+        address mintTo = vm.addr(12312312);
+        uint256 tokenId = _setupTokenAndSignatureMinter(maxSupply);
+
+        uint256 expiration = currentTime + expirationInFuture;
+
+        // generate signature for hash using creators private key
+        bytes memory signature = _signMintRequest(
+            authorizedSignerPrivateKey,
+            address(target),
+            tokenId,
+            randomBytes,
+            quantity,
+            pricePerToken,
+            expiration,
+            mintTo
+        );
+
+        // now build the calldata
+        bytes memory minterArguments = abi.encode(randomBytes, pricePerToken, expiration, mintTo, signature);
+
+        // now execute the mint as anyone (doesn't need to be the mintTo address)
+        uint256 mintValue = uint256(pricePerToken) * quantity;
+        address executorAddress = vm.addr(12314324123);
+        vm.deal(executorAddress, mintValue);
+        vm.prank(executorAddress);
+
+        target.mint{value: mintValue}(signatureMinter, tokenId, quantity, minterArguments);
+
+        // deal some more eth to the executor, and mint again, it should revert
+        vm.deal(executorAddress, mintValue);
+        vm.prank(executorAddress);
+        vm.expectRevert(ZoraSignatureMinterStrategy.AlreadyMinted.selector);
+        target.mint{value: mintValue}(signatureMinter, tokenId, quantity, minterArguments);
+
+        // now generate a new signature with a diff random bytes value
+        randomBytes = _flipBytes(randomBytes);
+
+        // create the signature from an authorized signer:
+        signature = _signMintRequest(authorizedSignerPrivateKey, address(target), tokenId, randomBytes, quantity, pricePerToken, expiration, mintTo);
+
+        // now build the calldata
+        minterArguments = abi.encode(randomBytes, pricePerToken, expiration, mintTo, signature);
+
+        // mint with these new args, should succeed
+        vm.prank(executorAddress);
+        target.mint{value: mintValue}(signatureMinter, tokenId, quantity, minterArguments);
+
+        // it should have minted twice
+        assertEq(target.balanceOf(mintTo, tokenId), quantity * 2);
     }
 
     function test_mint_revertsWhen_invalidSignature(
@@ -159,14 +248,11 @@ contract ZoraSignatureMinterStategyTest is Test {
 
         uint256 tokenId = _setupTokenAndSignatureMinter(maxSupply);
 
-        // create the signature from an authorized signer with the original correct data
-        bytes32 digest = signatureMinter.delegateCreateContractHashTypeData(address(target), tokenId, randomBytes, quantity, pricePerToken, expiration, mintTo);
-
         // if non authorized signer, change private key to use to another private key thats not authorized
         uint256 privateKeyToUse = nonAuthorizedSigner ? 0xA11CD : authorizedSignerPrivateKey;
 
-        // generate signature for hash using private key - which could be from a non-autohrized signer
-        bytes memory signature = _sign(privateKeyToUse, digest);
+        // create the signature from an authorized signer with the original correct data
+        bytes memory signature = _signMintRequest(privateKeyToUse, address(target), tokenId, randomBytes, quantity, pricePerToken, expiration, mintTo);
 
         // store the mint value before affecting price per token below
         uint256 mintValue = uint256(pricePerToken) * quantity;
@@ -185,8 +271,8 @@ contract ZoraSignatureMinterStategyTest is Test {
             mintTo = vm.addr(123);
         }
         if (randomBytesWrong) {
-            bytes32 mask = 0x0000000000000000000000000000000000000000000000000000000000000001; // mask with the LSB flipped
-            randomBytes = randomBytes ^ mask; // XOR the original with the mask to flip the LSB
+            // randomly alter bytes (by flipping them)
+            randomBytes = _flipBytes(randomBytes);
         }
         if (pricePerTokenWrong) {
             pricePerToken = pricePerToken + 1;
@@ -204,339 +290,87 @@ contract ZoraSignatureMinterStategyTest is Test {
         target.mint{value: mintValue}(signatureMinter, tokenId, quantity, minterArguments);
     }
 
-    // function test_MintWithCommentBackwardsCompatible() external {
-    //     vm.startPrank(admin);
-    //     uint256 newTokenId = target.setupNewToken("https://zora.co/testing/token.json", 10);
-    //     target.addPermission(newTokenId, address(signatureMinter), target.PERMISSION_BIT_MINTER());
-    //     vm.expectEmit(true, true, true, true);
-    //     emit SaleSet(
-    //         address(target),
-    //         newTokenId,
-    //         ZoraCreatorFixedPriceSaleStrategy.SalesConfig({
-    //             pricePerToken: 1 ether,
-    //             saleStart: 0,
-    //             saleEnd: type(uint64).max,
-    //             maxTokensPerAddress: 0,
-    //             fundsRecipient: address(0)
-    //         })
-    //     );
-    //     target.callSale(
-    //         newTokenId,
-    //         signatureMinter,
-    //         abi.encodeWithSelector(
-    //             ZoraCreatorFixedPriceSaleStrategy.setSale.selector,
-    //             newTokenId,
-    //             ZoraCreatorFixedPriceSaleStrategy.SalesConfig({
-    //                 pricePerToken: 1 ether,
-    //                 saleStart: 0,
-    //                 saleEnd: type(uint64).max,
-    //                 maxTokensPerAddress: 0,
-    //                 fundsRecipient: address(0)
-    //             })
-    //         )
-    //     );
-    //     vm.stopPrank();
+    function test_mint_revertsWhen_expired(uint128 expirationInFuture, uint8 timeSinceExpired) external {
+        uint256 pricePerToken = 2 ether;
+        vm.assume(expirationInFuture > 0);
+        vm.assume(timeSinceExpired > 0);
+        uint64 quantity = 4;
+        uint64 maxSupply = 10;
 
-    //     address tokenRecipient = address(322);
-    //     vm.deal(tokenRecipient, 20 ether);
+        bytes32 randomBytes = bytes32(uint256(123123));
+        address mintTo = vm.addr(123123123);
 
-    //     vm.startPrank(tokenRecipient);
-    //     target.mint{value: 10 ether}(signatureMinter, newTokenId, 10, abi.encode(tokenRecipient));
+        uint256 expiration = currentTime + expirationInFuture;
 
-    //     assertEq(target.balanceOf(tokenRecipient, newTokenId), 10);
-    //     assertEq(address(target).balance, 10 ether);
+        uint256 tokenId = _setupTokenAndSignatureMinter(maxSupply);
 
-    //     vm.stopPrank();
-    // }
+        bytes memory signature = _signMintRequest(
+            authorizedSignerPrivateKey,
+            address(target),
+            tokenId,
+            randomBytes,
+            quantity,
+            pricePerToken,
+            expiration,
+            mintTo
+        );
 
-    // function test_MintWithComment() external {
-    //     vm.startPrank(admin);
-    //     uint256 newTokenId = target.setupNewToken("https://zora.co/testing/token.json", 10);
-    //     target.addPermission(newTokenId, address(signatureMinter), target.PERMISSION_BIT_MINTER());
-    //     vm.expectEmit(true, true, true, true);
-    //     emit SaleSet(
-    //         address(target),
-    //         newTokenId,
-    //         ZoraCreatorFixedPriceSaleStrategy.SalesConfig({
-    //             pricePerToken: 1 ether,
-    //             saleStart: 0,
-    //             saleEnd: type(uint64).max,
-    //             maxTokensPerAddress: 0,
-    //             fundsRecipient: address(0)
-    //         })
-    //     );
-    //     target.callSale(
-    //         newTokenId,
-    //         signatureMinter,
-    //         abi.encodeWithSelector(
-    //             ZoraCreatorFixedPriceSaleStrategy.setSale.selector,
-    //             newTokenId,
-    //             ZoraCreatorFixedPriceSaleStrategy.SalesConfig({
-    //                 pricePerToken: 1 ether,
-    //                 saleStart: 0,
-    //                 saleEnd: type(uint64).max,
-    //                 maxTokensPerAddress: 0,
-    //                 fundsRecipient: address(0)
-    //             })
-    //         )
-    //     );
-    //     vm.stopPrank();
+        // store the mint value before affecting price per token below
+        uint256 mintValue = uint256(pricePerToken) * quantity;
 
-    //     address tokenRecipient = address(322);
-    //     vm.deal(tokenRecipient, 20 ether);
+        // now build the calldata
+        bytes memory minterArguments = abi.encode(randomBytes, pricePerToken, expiration, mintTo, signature);
 
-    //     vm.startPrank(tokenRecipient);
-    //     vm.expectEmit(true, true, true, true);
-    //     emit MintComment(tokenRecipient, address(target), newTokenId, 10, "test comment");
-    //     target.mint{value: 10 ether}(signatureMinter, newTokenId, 10, abi.encode(tokenRecipient, "test comment"));
+        // alter time to be past expiration
+        vm.warp(expiration + timeSinceExpired);
 
-    //     assertEq(target.balanceOf(tokenRecipient, newTokenId), 10);
-    //     assertEq(address(target).balance, 10 ether);
+        address executorAddress = vm.addr(12314324123);
+        vm.deal(executorAddress, mintValue);
+        vm.prank(executorAddress);
 
-    //     vm.stopPrank();
-    // }
+        // should revert with invalid signature
+        vm.expectRevert(abi.encodeWithSelector(ZoraSignatureMinterStrategy.Expired.selector, expiration));
+        target.mint{value: mintValue}(signatureMinter, tokenId, quantity, minterArguments);
+    }
 
-    // function test_SaleStart() external {
-    //     vm.startPrank(admin);
-    //     uint256 newTokenId = target.setupNewToken("https://zora.co/testing/token.json", 10);
-    //     target.addPermission(newTokenId, address(signatureMinter), target.PERMISSION_BIT_MINTER());
-    //     target.callSale(
-    //         newTokenId,
-    //         signatureMinter,
-    //         abi.encodeWithSelector(
-    //             ZoraCreatorFixedPriceSaleStrategy.setSale.selector,
-    //             newTokenId,
-    //             ZoraCreatorFixedPriceSaleStrategy.SalesConfig({
-    //                 pricePerToken: 1 ether,
-    //                 saleStart: uint64(block.timestamp + 1 days),
-    //                 saleEnd: type(uint64).max,
-    //                 maxTokensPerAddress: 10,
-    //                 fundsRecipient: address(0)
-    //             })
-    //         )
-    //     );
-    //     vm.stopPrank();
+    function test_mint_revertsWhen_wrongValueSent(uint128 pricePerToken, int8 valueDifference) external {
+        vm.assume(valueDifference != 0);
+        uint64 quantity = 4;
+        uint64 maxSupply = 10;
 
-    //     address tokenRecipient = address(322);
-    //     vm.deal(tokenRecipient, 20 ether);
+        bytes32 randomBytes = bytes32(uint256(123123));
+        address mintTo = vm.addr(123123123);
 
-    //     vm.expectRevert(abi.encodeWithSignature("SaleHasNotStarted()"));
-    //     vm.prank(tokenRecipient);
-    //     target.mint{value: 10 ether}(signatureMinter, newTokenId, 10, abi.encode(tokenRecipient, ""));
-    // }
+        uint256 expiration = currentTime + 2 days;
 
-    // function test_SaleEnd() external {
-    //     vm.warp(2 days);
+        uint256 tokenId = _setupTokenAndSignatureMinter(maxSupply);
 
-    //     vm.startPrank(admin);
-    //     uint256 newTokenId = target.setupNewToken("https://zora.co/testing/token.json", 10);
-    //     target.addPermission(newTokenId, address(signatureMinter), target.PERMISSION_BIT_MINTER());
-    //     target.callSale(
-    //         newTokenId,
-    //         signatureMinter,
-    //         abi.encodeWithSelector(
-    //             ZoraCreatorFixedPriceSaleStrategy.setSale.selector,
-    //             newTokenId,
-    //             ZoraCreatorFixedPriceSaleStrategy.SalesConfig({
-    //                 pricePerToken: 1 ether,
-    //                 saleStart: 0,
-    //                 saleEnd: uint64(1 days),
-    //                 maxTokensPerAddress: 0,
-    //                 fundsRecipient: address(0)
-    //             })
-    //         )
-    //     );
-    //     vm.stopPrank();
+        bytes memory signature = _signMintRequest(
+            authorizedSignerPrivateKey,
+            address(target),
+            tokenId,
+            randomBytes,
+            quantity,
+            pricePerToken,
+            expiration,
+            mintTo
+        );
 
-    //     address tokenRecipient = address(322);
-    //     vm.deal(tokenRecipient, 20 ether);
+        // store the mint value before affecting price per token below
+        uint256 mintValue = uint256(pricePerToken) * quantity;
 
-    //     vm.expectRevert(abi.encodeWithSignature("SaleEnded()"));
-    //     vm.prank(tokenRecipient);
-    //     target.mint{value: 10 ether}(signatureMinter, newTokenId, 10, abi.encode(tokenRecipient, ""));
-    // }
+        // now build the calldata
+        bytes memory minterArguments = abi.encode(randomBytes, pricePerToken, expiration, mintTo, signature);
 
-    // function test_MaxTokensPerAddress() external {
-    //     vm.warp(2 days);
+        // alter value to send
+        uint256 toSend = uint256(int256(mintValue) + valueDifference);
 
-    //     vm.startPrank(admin);
-    //     uint256 newTokenId = target.setupNewToken("https://zora.co/testing/token.json", 10);
-    //     target.addPermission(newTokenId, address(signatureMinter), target.PERMISSION_BIT_MINTER());
-    //     target.callSale(
-    //         newTokenId,
-    //         signatureMinter,
-    //         abi.encodeWithSelector(
-    //             ZoraCreatorFixedPriceSaleStrategy.setSale.selector,
-    //             newTokenId,
-    //             ZoraCreatorFixedPriceSaleStrategy.SalesConfig({
-    //                 pricePerToken: 1 ether,
-    //                 saleStart: 0,
-    //                 saleEnd: type(uint64).max,
-    //                 maxTokensPerAddress: 5,
-    //                 fundsRecipient: address(0)
-    //             })
-    //         )
-    //     );
-    //     vm.stopPrank();
+        address executorAddress = vm.addr(12314324123);
+        vm.deal(executorAddress, toSend);
+        vm.prank(executorAddress);
 
-    //     address tokenRecipient = address(322);
-    //     vm.deal(tokenRecipient, 20 ether);
-
-    //     vm.prank(tokenRecipient);
-    //     vm.expectRevert(abi.encodeWithSelector(ILimitedMintPerAddress.UserExceedsMintLimit.selector, tokenRecipient, 5, 6));
-    //     target.mint{value: 6 ether}(signatureMinter, newTokenId, 6, abi.encode(tokenRecipient, ""));
-    // }
-
-    // function testFail_setupMint() external {
-    //     vm.startPrank(admin);
-    //     uint256 newTokenId = target.setupNewToken("https://zora.co/testing/token.json", 10);
-    //     target.addPermission(newTokenId, address(signatureMinter), target.PERMISSION_BIT_MINTER());
-    //     target.callSale(
-    //         newTokenId,
-    //         signatureMinter,
-    //         abi.encodeWithSelector(
-    //             ZoraCreatorFixedPriceSaleStrategy.setSale.selector,
-    //             newTokenId,
-    //             ZoraCreatorFixedPriceSaleStrategy.SalesConfig({
-    //                 pricePerToken: 1 ether,
-    //                 saleStart: 0,
-    //                 saleEnd: type(uint64).max,
-    //                 maxTokensPerAddress: 9,
-    //                 fundsRecipient: address(0)
-    //             })
-    //         )
-    //     );
-    //     vm.stopPrank();
-
-    //     address tokenRecipient = address(322);
-    //     vm.deal(tokenRecipient, 20 ether);
-
-    //     vm.startPrank(tokenRecipient);
-    //     target.mint{value: 10 ether}(signatureMinter, newTokenId, 10, abi.encode(tokenRecipient));
-
-    //     assertEq(target.balanceOf(tokenRecipient, newTokenId), 10);
-    //     assertEq(address(target).balance, 10 ether);
-
-    //     vm.stopPrank();
-    // }
-
-    // function test_PricePerToken() external {
-    //     vm.warp(2 days);
-
-    //     vm.startPrank(admin);
-    //     uint256 newTokenId = target.setupNewToken("https://zora.co/testing/token.json", 10);
-    //     target.addPermission(newTokenId, address(signatureMinter), target.PERMISSION_BIT_MINTER());
-    //     target.callSale(
-    //         newTokenId,
-    //         signatureMinter,
-    //         abi.encodeWithSelector(
-    //             ZoraCreatorFixedPriceSaleStrategy.setSale.selector,
-    //             newTokenId,
-    //             ZoraCreatorFixedPriceSaleStrategy.SalesConfig({
-    //                 pricePerToken: 1 ether,
-    //                 saleStart: 0,
-    //                 saleEnd: type(uint64).max,
-    //                 maxTokensPerAddress: 0,
-    //                 fundsRecipient: address(0)
-    //             })
-    //         )
-    //     );
-    //     vm.stopPrank();
-
-    //     address tokenRecipient = address(322);
-    //     vm.deal(tokenRecipient, 20 ether);
-
-    //     vm.startPrank(tokenRecipient);
-    //     vm.expectRevert(abi.encodeWithSignature("WrongValueSent()"));
-    //     target.mint{value: 0.9 ether}(signatureMinter, newTokenId, 1, abi.encode(tokenRecipient, ""));
-    //     vm.expectRevert(abi.encodeWithSignature("WrongValueSent()"));
-    //     target.mint{value: 1.1 ether}(signatureMinter, newTokenId, 1, abi.encode(tokenRecipient, ""));
-    //     target.mint{value: 1 ether}(signatureMinter, newTokenId, 1, abi.encode(tokenRecipient, ""));
-    //     vm.stopPrank();
-    // }
-
-    // function test_FundsRecipient() external {
-    //     vm.startPrank(admin);
-    //     uint256 newTokenId = target.setupNewToken("https://zora.co/testing/token.json", 10);
-    //     target.addPermission(newTokenId, address(signatureMinter), target.PERMISSION_BIT_MINTER());
-    //     target.callSale(
-    //         newTokenId,
-    //         signatureMinter,
-    //         abi.encodeWithSelector(
-    //             ZoraCreatorFixedPriceSaleStrategy.setSale.selector,
-    //             newTokenId,
-    //             ZoraCreatorFixedPriceSaleStrategy.SalesConfig({
-    //                 pricePerToken: 1 ether,
-    //                 saleStart: 0,
-    //                 saleEnd: type(uint64).max,
-    //                 maxTokensPerAddress: 0,
-    //                 fundsRecipient: address(1)
-    //             })
-    //         )
-    //     );
-    //     vm.stopPrank();
-
-    //     address tokenRecipient = address(322);
-    //     vm.deal(tokenRecipient, 20 ether);
-    //     vm.prank(tokenRecipient);
-    //     target.mint{value: 10 ether}(signatureMinter, newTokenId, 10, abi.encode(tokenRecipient, ""));
-
-    //     assertEq(address(1).balance, 10 ether);
-    // }
-
-    // function test_MintedPerRecipientGetter() external {
-    //     vm.startPrank(admin);
-    //     uint256 newTokenId = target.setupNewToken("https://zora.co/testing/token.json", 10);
-    //     target.addPermission(newTokenId, address(signatureMinter), target.PERMISSION_BIT_MINTER());
-    //     target.callSale(
-    //         newTokenId,
-    //         signatureMinter,
-    //         abi.encodeWithSelector(
-    //             ZoraCreatorFixedPriceSaleStrategy.setSale.selector,
-    //             newTokenId,
-    //             ZoraCreatorFixedPriceSaleStrategy.SalesConfig({
-    //                 pricePerToken: 0 ether,
-    //                 saleStart: 0,
-    //                 saleEnd: type(uint64).max,
-    //                 maxTokensPerAddress: 20,
-    //                 fundsRecipient: address(0)
-    //             })
-    //         )
-    //     );
-    //     vm.stopPrank();
-
-    //     address tokenRecipient = address(322);
-    //     vm.deal(tokenRecipient, 20 ether);
-    //     vm.prank(tokenRecipient);
-    //     target.mint{value: 0 ether}(signatureMinter, newTokenId, 10, abi.encode(tokenRecipient, ""));
-
-    //     assertEq(signatureMinter.getMintedPerWallet(address(target), newTokenId, tokenRecipient), 10);
-    // }
-
-    // function test_ResetSale() external {
-    //     vm.startPrank(admin);
-    //     uint256 newTokenId = target.setupNewToken("https://zora.co/testing/token.json", 10);
-    //     target.addPermission(newTokenId, address(signatureMinter), target.PERMISSION_BIT_MINTER());
-    //     vm.expectEmit(false, false, false, false);
-    //     emit SaleSet(
-    //         address(target),
-    //         newTokenId,
-    //         ZoraCreatorFixedPriceSaleStrategy.SalesConfig({pricePerToken: 0, saleStart: 0, saleEnd: 0, maxTokensPerAddress: 0, fundsRecipient: address(0)})
-    //     );
-    //     target.callSale(newTokenId, signatureMinter, abi.encodeWithSelector(ZoraCreatorFixedPriceSaleStrategy.resetSale.selector, newTokenId));
-    //     vm.stopPrank();
-
-    //     ZoraCreatorFixedPriceSaleStrategy.SalesConfig memory sale = signatureMinter.sale(address(target), newTokenId);
-    //     assertEq(sale.pricePerToken, 0);
-    //     assertEq(sale.saleStart, 0);
-    //     assertEq(sale.saleEnd, 0);
-    //     assertEq(sale.maxTokensPerAddress, 0);
-    //     assertEq(sale.fundsRecipient, address(0));
-    // }
-
-    // function test_fixedPriceSaleSupportsInterface() public {
-    //     assertTrue(signatureMinter.supportsInterface(0x6890e5b3));
-    //     assertTrue(signatureMinter.supportsInterface(0x01ffc9a7));
-    //     assertFalse(signatureMinter.supportsInterface(0x0));
-    // }
+        // should revert
+        vm.expectRevert(abi.encodeWithSelector(ZoraSignatureMinterStrategy.WrongValueSent.selector, mintValue, toSend));
+        target.mint{value: toSend}(signatureMinter, tokenId, quantity, minterArguments);
+    }
 }
