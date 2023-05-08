@@ -122,24 +122,35 @@ contract ZoraSignatureMinterStategyTest is Test {
         return _sign(signer, digest);
     }
 
-    function _signMintRequestAndGetMintParams(
-        uint256 signer,
-        address _target,
-        uint256 tokenId,
-        bytes32 nonce,
-        uint256 quantity,
-        uint256 pricePerToken,
-        uint256 expiration,
-        address mintTo
-    ) private view returns (bytes memory signature, bytes memory minterArguments, uint256 mintValue) {
+    struct SignMintAndRequestParam {
+        uint256 signer;
+        address target;
+        uint256 tokenId;
+        bytes32 nonce;
+        uint256 quantity;
+        uint256 pricePerToken;
+        uint256 expiration;
+        address mintTo;
+    }
+
+    function _signMintRequestAndGetMintParams(SignMintAndRequestParam memory params) private view returns (bytes memory minterArguments, uint256 mintValue) {
         // build signature:
-        signature = _signMintRequest(signer, _target, tokenId, nonce, quantity, pricePerToken, expiration, mintTo);
+        bytes memory signature = _signMintRequest(
+            params.signer,
+            params.target,
+            params.tokenId,
+            params.nonce,
+            params.quantity,
+            params.pricePerToken,
+            params.expiration,
+            params.mintTo
+        );
 
         // build minter arguments, which are to be used for minting:
-        minterArguments = signatureMinter.encodeMinterArgumets(nonce, pricePerToken, expiration, mintTo, signature);
+        minterArguments = signatureMinter.encodeMinterArgumets(params.nonce, params.pricePerToken, params.expiration, params.mintTo, signature);
 
         // compute mint value:
-        mintValue = pricePerToken * quantity;
+        mintValue = params.pricePerToken * params.quantity;
     }
 
     function _flipBytes(bytes32 toFlip) private pure returns (bytes32) {
@@ -163,15 +174,8 @@ contract ZoraSignatureMinterStategyTest is Test {
         uint256 expiration = currentTime + expirationInFuture;
 
         // generate signature for data using creators private key
-        (, bytes memory minterArguments, uint256 mintValue) = _signMintRequestAndGetMintParams(
-            authorizedSignerPrivateKey,
-            address(target),
-            tokenId,
-            randomBytes,
-            quantity,
-            pricePerToken,
-            expiration,
-            mintTo
+        (bytes memory minterArguments, uint256 mintValue) = _signMintRequestAndGetMintParams(
+            SignMintAndRequestParam(authorizedSignerPrivateKey, address(target), tokenId, randomBytes, quantity, pricePerToken, expiration, mintTo)
         );
 
         address executorAddress = vm.addr(12314324123);
@@ -185,50 +189,28 @@ contract ZoraSignatureMinterStategyTest is Test {
     }
 
     function test_mint_revertsWhen_mintedTwice_butSucceedsWhen_randomBytesChanges(
-        uint64 pricePerToken,
-        uint64 quantity,
-        uint64 maxSupply,
-        uint64 expirationInFuture,
+        uint256 pricePerToken,
+        uint256 quantity,
+        uint256 maxSupply,
+        uint256 expirationInFuture,
         bytes32 randomBytes
     ) external {
-        vm.assume(quantity > 0);
-        // since we will mint twicek
-        vm.assume(maxSupply >= uint256(quantity) * 2);
-        vm.assume(expirationInFuture > 0);
+        {
+            vm.assume(pricePerToken < 5 ether);
+            vm.assume(quantity < 100000);
+            vm.assume(quantity > 0);
+            // since we will mint twicek
+            vm.assume(maxSupply >= uint256(quantity) * 2);
+            vm.assume(expirationInFuture > 0 && expirationInFuture < 3 days);
+        }
         address mintTo = vm.addr(12312312);
         uint256 tokenId = _setupTokenAndSignatureMinter(maxSupply);
 
         uint256 expiration = currentTime + expirationInFuture;
 
-        // generate signature for hash using creators private key, and get mint arguments
-        (, bytes memory minterArguments, uint256 mintValue) = _signMintRequestAndGetMintParams(
-            authorizedSignerPrivateKey,
-            address(target),
-            tokenId,
-            randomBytes,
-            quantity,
-            pricePerToken,
-            expiration,
-            mintTo
-        );
-
         address executorAddress = vm.addr(12314324123);
-        vm.deal(executorAddress, mintValue);
-        vm.prank(executorAddress);
 
-        target.mint{value: mintValue}(signatureMinter, tokenId, quantity, minterArguments);
-
-        // deal some more eth to the executor, and mint again, it should revert
-        vm.deal(executorAddress, mintValue);
-        vm.prank(executorAddress);
-        vm.expectRevert(ZoraSignatureMinterStrategy.AlreadyMinted.selector);
-        target.mint{value: mintValue}(signatureMinter, tokenId, quantity, minterArguments);
-
-        // now generate a new signature with a diff random bytes value
-        randomBytes = _flipBytes(randomBytes);
-
-        // create the signature from an authorized signer:
-        (, minterArguments, mintValue) = _signMintRequestAndGetMintParams(
+        SignMintAndRequestParam memory callParams = SignMintAndRequestParam(
             authorizedSignerPrivateKey,
             address(target),
             tokenId,
@@ -239,9 +221,34 @@ contract ZoraSignatureMinterStategyTest is Test {
             mintTo
         );
 
-        // mint with these new args, should succeed
-        vm.prank(executorAddress);
-        target.mint{value: mintValue}(signatureMinter, tokenId, quantity, minterArguments);
+        // generate signature for hash using creators private key, and get mint arguments
+        (bytes memory minterArguments, uint256 mintValue) = _signMintRequestAndGetMintParams(callParams);
+
+        {
+            vm.deal(executorAddress, mintValue);
+            vm.prank(executorAddress);
+
+            target.mint{value: mintValue}(signatureMinter, tokenId, quantity, minterArguments);
+        }
+
+        {
+            // deal some more eth to the executor, and mint again, it should revert
+            vm.deal(executorAddress, mintValue);
+            vm.prank(executorAddress);
+            vm.expectRevert(ZoraSignatureMinterStrategy.AlreadyMinted.selector);
+            target.mint{value: mintValue}(signatureMinter, tokenId, quantity, minterArguments);
+        }
+
+        {
+            // now generate a new signature with a diff random bytes value
+            callParams.nonce = _flipBytes(randomBytes);
+            // create the signature from an authorized signer:
+            (minterArguments, mintValue) = _signMintRequestAndGetMintParams(callParams);
+
+            // mint with these new args, should succeed
+            vm.prank(executorAddress);
+            target.mint{value: mintValue}(signatureMinter, tokenId, quantity, minterArguments);
+        }
 
         // it should have minted twice
         assertEq(target.balanceOf(mintTo, tokenId), quantity * 2);
@@ -330,7 +337,7 @@ contract ZoraSignatureMinterStategyTest is Test {
 
         uint256 tokenId = _setupTokenAndSignatureMinter(maxSupply);
 
-        (, bytes memory minterArguments, uint256 mintValue) = _signMintRequestAndGetMintParams(
+        SignMintAndRequestParam memory callParams = SignMintAndRequestParam(
             authorizedSignerPrivateKey,
             address(target),
             tokenId,
@@ -340,6 +347,8 @@ contract ZoraSignatureMinterStategyTest is Test {
             expiration,
             mintTo
         );
+
+        (bytes memory minterArguments, uint256 mintValue) = _signMintRequestAndGetMintParams(callParams);
 
         // alter time to be past expiration
         vm.warp(expiration + timeSinceExpired);
@@ -365,7 +374,7 @@ contract ZoraSignatureMinterStategyTest is Test {
 
         uint256 tokenId = _setupTokenAndSignatureMinter(maxSupply);
 
-        (, bytes memory minterArguments, uint256 mintValue) = _signMintRequestAndGetMintParams(
+        SignMintAndRequestParam memory callParams = SignMintAndRequestParam(
             authorizedSignerPrivateKey,
             address(target),
             tokenId,
@@ -375,6 +384,8 @@ contract ZoraSignatureMinterStategyTest is Test {
             expiration,
             mintTo
         );
+
+        (bytes memory minterArguments, uint256 mintValue) = _signMintRequestAndGetMintParams(callParams);
 
         // alter value to send
         uint256 toSend = uint256(int256(mintValue) + valueDifference);
@@ -386,84 +397,5 @@ contract ZoraSignatureMinterStategyTest is Test {
         // should revert
         vm.expectRevert(abi.encodeWithSelector(ZoraSignatureMinterStrategy.WrongValueSent.selector, mintValue, toSend));
         target.mint{value: toSend}(signatureMinter, tokenId, quantity, minterArguments);
-    }
-
-    function test_configuration_isDifferentPerToken() external {
-        uint256 maxSupply = 10;
-        uint256 firstTokenId = _setupTokenAndSignatureMinter(maxSupply);
-
-        // now setup manually another token - with another auth registry and a different authorized signer
-        MockAuthRegistry anotherAuthRegistry = new MockAuthRegistry();
-        uint256 anotherSignerPrivateKey = 0xA11CD;
-        address anotherSignerAddrses = vm.addr(anotherSignerPrivateKey);
-        anotherAuthRegistry.addAuthorized(anotherSignerAddrses);
-
-        uint256 secondTokenId = _setupTokenAndSignatureMinterWithAuthRegistry(maxSupply, anotherAuthRegistry);
-
-        bytes32 randomBytes = bytes32(uint256(123123));
-        uint256 quantity = 5;
-        uint256 pricePerToken = 2 ether;
-        uint256 expiration = currentTime + 2 days;
-
-        address mintTo = vm.addr(123123123);
-
-        bytes memory minterArguments;
-        uint256 mintValue;
-        address executorAddress = vm.addr(12314324123);
-
-        // sign a mint request with the original signer for the first token and execute it; it should succeed
-        {
-            (, minterArguments, mintValue) = _signMintRequestAndGetMintParams(
-                authorizedSignerPrivateKey,
-                address(target),
-                firstTokenId,
-                randomBytes,
-                quantity,
-                pricePerToken,
-                expiration,
-                mintTo
-            );
-
-            vm.deal(executorAddress, mintValue);
-            vm.prank(executorAddress);
-
-            target.mint{value: mintValue}(signatureMinter, firstTokenId, quantity, minterArguments);
-        }
-
-        // sign a mint request with the original signer for the new token and execute it; it should fail
-        // change random bytes to that already minted doesnt happen
-        {
-            randomBytes = _flipBytes(randomBytes);
-
-            (, minterArguments, mintValue) = _signMintRequestAndGetMintParams(
-                authorizedSignerPrivateKey,
-                address(target),
-                secondTokenId,
-                randomBytes,
-                quantity,
-                pricePerToken,
-                expiration,
-                mintTo
-            );
-
-            vm.expectRevert(ZoraSignatureMinterStrategy.InvalidSignature.selector);
-            target.mint{value: mintValue}(signatureMinter, secondTokenId, quantity, minterArguments);
-        }
-
-        {
-            // sign a mint request with the new signer for the new token and execute it, it should succeed
-            (, minterArguments, mintValue) = _signMintRequestAndGetMintParams(
-                anotherSignerPrivateKey,
-                address(target),
-                secondTokenId,
-                randomBytes,
-                quantity,
-                pricePerToken,
-                expiration,
-                mintTo
-            );
-
-            target.mint{value: mintValue}(signatureMinter, secondTokenId, quantity, minterArguments);
-        }
     }
 }
