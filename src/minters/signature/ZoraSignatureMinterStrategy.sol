@@ -96,7 +96,7 @@ contract ZoraSignatureMinterStrategy is Enjoy, SaleStrategy, LimitedMintPerAddre
     /// @param tokenId The token ID to mint
     /// @param quantity The quantity of tokens to mint
     /// @param ethValueSent The amount of ETH sent with the transaction
-    /// @param minterArguments The additional arguments passed to the minter including additional mint params and the signature
+    /// @param minterArguments The additional arguments passed to the minter encoded as calldata.  This should include: uid (randomly generated unique id), pricePerToken (amount needed to pay per token), expiration (signature expiration), mintTo (which account will receive the mint), and the signature.
     function requestMint(
         address,
         uint256 tokenId,
@@ -135,6 +135,22 @@ contract ZoraSignatureMinterStrategy is Enjoy, SaleStrategy, LimitedMintPerAddre
         }
 
         return _executeMintAndTransferFunds(target, tokenId, quantity, mintTo, ethValueSent);
+    }
+
+    /// Helper utility to encode additional arguments needed to send to mint
+    /// @param uid Unique id of the mint included in the signature
+    /// @param pricePerToken Price per token
+    /// @param expiration When signature expires
+    /// @param mintTo Which account should receive the mint
+    /// @param signature The signature created by the authorized signer
+    function encodeMinterArgumets(
+        bytes32 uid,
+        uint256 pricePerToken,
+        uint256 expiration,
+        address mintTo,
+        bytes memory signature
+    ) external pure returns (bytes memory) {
+        return abi.encode(uid, pricePerToken, expiration, mintTo, signature);
     }
 
     /// Used to create a hash of the data for the requestMint function,
