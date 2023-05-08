@@ -110,13 +110,13 @@ contract ZoraSignatureMinterStategyTest is Test {
         uint256 signer,
         address _target,
         uint256 tokenId,
-        bytes32 randomBytes,
+        bytes32 nonce,
         uint256 quantity,
         uint256 pricePerToken,
         uint256 expiration,
         address mintTo
     ) private view returns (bytes memory) {
-        bytes32 digest = signatureMinter.delegateCreateContractHashTypeData(_target, tokenId, randomBytes, quantity, pricePerToken, expiration, mintTo);
+        bytes32 digest = signatureMinter.delegateCreateContractHashTypeData(_target, tokenId, nonce, quantity, pricePerToken, expiration, mintTo);
 
         // generate signature for hash using creators private key
         return _sign(signer, digest);
@@ -126,17 +126,17 @@ contract ZoraSignatureMinterStategyTest is Test {
         uint256 signer,
         address _target,
         uint256 tokenId,
-        bytes32 randomBytes,
+        bytes32 nonce,
         uint256 quantity,
         uint256 pricePerToken,
         uint256 expiration,
         address mintTo
     ) private view returns (bytes memory signature, bytes memory minterArguments, uint256 mintValue) {
         // build signature:
-        signature = _signMintRequest(signer, _target, tokenId, randomBytes, quantity, pricePerToken, expiration, mintTo);
+        signature = _signMintRequest(signer, _target, tokenId, nonce, quantity, pricePerToken, expiration, mintTo);
 
         // build minter arguments, which are to be used for minting:
-        minterArguments = signatureMinter.encodeMinterArgumets(randomBytes, pricePerToken, expiration, mintTo, signature);
+        minterArguments = signatureMinter.encodeMinterArgumets(nonce, pricePerToken, expiration, mintTo, signature);
 
         // compute mint value:
         mintValue = pricePerToken * quantity;
