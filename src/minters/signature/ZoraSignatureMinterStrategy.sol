@@ -89,8 +89,6 @@ contract ZoraSignatureMinterStrategy is Enjoy, SaleStrategy, LimitedMintPerAddre
 
     constructor() EIP712("ZoraSignatureMinterStrategy", "1") {}
 
-    error MerkleClaimsExceeded();
-
     /// @notice Compiles and returns the commands needed to mint a token using this sales strategy.  Requires a signature
     /// to have been created off-chain by an authorized signer.
     /// @param tokenId The token ID to mint

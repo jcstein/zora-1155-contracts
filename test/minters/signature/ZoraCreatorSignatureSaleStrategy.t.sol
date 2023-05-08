@@ -382,20 +382,73 @@ contract ZoraSignatureMinterStategyTest is Test {
         target.mint{value: toSend}(signatureMinter, tokenId, quantity, minterArguments);
     }
 
-    // function test_configuration_isDifferentPerToken() external {
-    //     uint256 maxSupply = 10;
-    //     _setupTokenAndSignatureMinter(maxSupply);
+    function test_configuration_isDifferentPerToken() external {
+        uint256 maxSupply = 10;
+        uint256 firstTokenId = _setupTokenAndSignatureMinter(maxSupply);
 
-    //     // now setup manually another token - with another auth registry and a different authorized signer
-    //     MockAuthRegistry anotherAuthRegistry = new MockAuthRegistry();
-    //     uint256 anotherSignerPrivateKey = 0xA11CD;
-    //     address anotherSignerAddrses = vm.addr(anotherSignerPrivateKey);
-    //     anotherAuthRegistry.addAuthorized(anotherSignerAddrses);
+        // now setup manually another token - with another auth registry and a different authorized signer
+        MockAuthRegistry anotherAuthRegistry = new MockAuthRegistry();
+        uint256 anotherSignerPrivateKey = 0xA11CD;
+        address anotherSignerAddrses = vm.addr(anotherSignerPrivateKey);
+        anotherAuthRegistry.addAuthorized(anotherSignerAddrses);
 
-    //     _setupTokenAndSignatureMinterWithAuthRegistry(maxSupply, anotherAuthRegistry);
+        uint256 secondTokenId = _setupTokenAndSignatureMinterWithAuthRegistry(maxSupply, anotherAuthRegistry);
 
-    //     // sign a mint request with the original signer for the first token and execute it; it should succeed
-    //     // sign a mint request with the original signer for the new token and execute it; it should fail
-    //     // sign a mint request with the new signer for the new token and execute it, it should succeed
-    // }
+        bytes32 randomBytes = bytes32(uint256(123123));
+        uint256 quantity = 5;
+        uint256 pricePerToken = 2 ether;
+        uint256 expiration = currentTime + 2 days;
+
+        address mintTo = vm.addr(123123123);
+
+        // sign a mint request with the original signer for the first token and execute it; it should succeed
+        (, bytes memory minterArguments, uint256 mintValue) = _signMintRequestAndGetMintParams(
+            authorizedSignerPrivateKey,
+            address(target),
+            firstTokenId,
+            randomBytes,
+            quantity,
+            pricePerToken,
+            expiration,
+            mintTo
+        );
+
+        address executorAddress = vm.addr(12314324123);
+        vm.deal(executorAddress, mintValue);
+        vm.prank(executorAddress);
+
+        target.mint{value: mintValue}(signatureMinter, firstTokenId, quantity, minterArguments);
+
+        // sign a mint request with the original signer for the new token and execute it; it should fail
+        // change random bytes to that already minted doesnt happen
+        randomBytes = _flipBytes(randomBytes);
+
+        (, minterArguments, mintValue) = _signMintRequestAndGetMintParams(
+            authorizedSignerPrivateKey,
+            address(target),
+            secondTokenId,
+            randomBytes,
+            quantity,
+            pricePerToken,
+            expiration,
+            mintTo
+        );
+
+        vm.expectRevert(ZoraSignatureMinterStrategy.InvalidSignature.selector);
+        target.mint{value: mintValue}(signatureMinter, secondTokenId, quantity, minterArguments);
+
+        // sign a mint request with the new signer for the new token and execute it, it should succeed
+        (, minterArguments, mintValue) = _signMintRequestAndGetMintParams(
+            anotherSignerPrivateKey,
+            address(target),
+            secondTokenId,
+            randomBytes,
+            quantity,
+            pricePerToken,
+            expiration,
+            mintTo
+        );
+
+        target.mint{value: mintValue}(signatureMinter, secondTokenId, quantity, minterArguments);
+    }
 }
