@@ -54,13 +54,13 @@ contract ZoraSignatureMinterStrategy is Enjoy, SaleStrategy, LimitedMintPerAddre
         address fundsRecipient;
     }
 
-    // target -> tokenId -> settings
-    mapping(address => mapping(uint256 => SalesConfig)) signatureSaleSettings;
+    // target -> settings
+    mapping(address => SalesConfig) signatureSaleSettings;
     // target contract -> unique nonce -> if has been minted already
     mapping(address => mapping(bytes32 => bool)) private minted;
 
     /// @notice Event for sale configuration updated
-    event SaleSet(address indexed mediaContract, uint256 indexed tokenId, SalesConfig signatureSaleSettings);
+    event SaleSet(address indexed mediaContract, SalesConfig signatureSaleSettings);
 
     error SaleEnded();
     error SaleHasNotStarted();
@@ -112,7 +112,7 @@ contract ZoraSignatureMinterStrategy is Enjoy, SaleStrategy, LimitedMintPerAddre
         address signer = _recover(target, tokenId, nonce, quantity, pricePerToken, expiration, mintTo, signature);
 
         // do we need this setting to be there for each token, or just be the same across the board?
-        if (signer == address(0) || !isAuthorizedToSign(signer, target, tokenId)) {
+        if (signer == address(0) || !isAuthorizedToSign(signer, target)) {
             revert InvalidSignature();
         }
 
@@ -182,8 +182,8 @@ contract ZoraSignatureMinterStrategy is Enjoy, SaleStrategy, LimitedMintPerAddre
         return ECDSA.recover(digest, signature);
     }
 
-    function isAuthorizedToSign(address signer, address target, uint256 tokenId) public view returns (bool) {
-        return signatureSaleSettings[target][tokenId].authorizedSignatureCreators.isAuthorized(signer);
+    function isAuthorizedToSign(address signer, address target) public view returns (bool) {
+        return signatureSaleSettings[target].authorizedSignatureCreators.isAuthorized(signer);
     }
 
     function _executeMintAndTransferFunds(
@@ -193,7 +193,7 @@ contract ZoraSignatureMinterStrategy is Enjoy, SaleStrategy, LimitedMintPerAddre
         address mintTo,
         uint256 ethValueSent
     ) private view returns (ICreatorCommands.CommandSet memory commands) {
-        address fundsRecipient = signatureSaleSettings[target][tokenId].fundsRecipient;
+        address fundsRecipient = signatureSaleSettings[target].fundsRecipient;
         // Should transfer funds if funds recipient is set to a non-default address
         bool shouldTransferFunds = fundsRecipient != address(0);
 
@@ -209,26 +209,25 @@ contract ZoraSignatureMinterStrategy is Enjoy, SaleStrategy, LimitedMintPerAddre
     }
 
     /// @notice Sets the sale configuration for a token.  Meant to be called from the erc1155 contract
-    function setSale(uint256 tokenId, SalesConfig calldata _signatureSaleSettings) external {
-        signatureSaleSettings[msg.sender][tokenId] = _signatureSaleSettings;
+    function setSale(SalesConfig calldata _signatureSaleSettings) external {
+        signatureSaleSettings[msg.sender] = _signatureSaleSettings;
 
         // Emit event for new sale
-        emit SaleSet(msg.sender, tokenId, _signatureSaleSettings);
+        emit SaleSet(msg.sender, _signatureSaleSettings);
     }
 
     /// @notice Resets the sale configuration for a token
     function resetSale(uint256 tokenId) external override {
-        delete signatureSaleSettings[msg.sender][tokenId];
+        delete signatureSaleSettings[msg.sender];
 
         // Emit event with empty sale
-        emit SaleSet(msg.sender, tokenId, signatureSaleSettings[msg.sender][tokenId]);
+        emit SaleSet(msg.sender, signatureSaleSettings[msg.sender]);
     }
 
     /// @notice Gets the sale configuration for a token
     /// @param tokenContract address to look up sale for
-    /// @param tokenId token ID to look up sale for
-    function sale(address tokenContract, uint256 tokenId) external view returns (SalesConfig memory) {
-        return signatureSaleSettings[tokenContract][tokenId];
+    function sale(address tokenContract) external view returns (SalesConfig memory) {
+        return signatureSaleSettings[tokenContract];
     }
 
     /// @notice IERC165 interface

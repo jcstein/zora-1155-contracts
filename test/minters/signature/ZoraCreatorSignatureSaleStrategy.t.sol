@@ -39,7 +39,7 @@ contract ZoraSignatureMinterStategyTest is Test {
 
     IAuthRegistry internal authRegistry;
 
-    event SaleSet(address indexed mediaContract, uint256 indexed tokenId, ZoraSignatureMinterStrategy.SalesConfig salesConfig);
+    event SaleSet(address indexed mediaContract, ZoraSignatureMinterStrategy.SalesConfig salesConfig);
     event MintComment(address indexed sender, address indexed tokenContract, uint256 indexed tokenId, uint256 quantity, string comment);
 
     function setUp() external {
@@ -74,9 +74,9 @@ contract ZoraSignatureMinterStategyTest is Test {
             fundsRecipient: fundsRecipient
         });
 
-        emit SaleSet(address(target), newTokenId, salesConfig);
+        emit SaleSet(address(target), salesConfig);
 
-        target.callSale(newTokenId, signatureMinter, abi.encodeWithSelector(ZoraSignatureMinterStrategy.setSale.selector, newTokenId, salesConfig));
+        target.callSale(newTokenId, signatureMinter, abi.encodeWithSelector(ZoraSignatureMinterStrategy.setSale.selector, salesConfig));
         vm.stopPrank();
     }
 
@@ -90,7 +90,7 @@ contract ZoraSignatureMinterStategyTest is Test {
             fundsRecipient: fundsRecipient
         });
 
-        target.callSale(newTokenId, signatureMinter, abi.encodeWithSelector(ZoraSignatureMinterStrategy.setSale.selector, newTokenId, salesConfig));
+        target.callSale(newTokenId, signatureMinter, abi.encodeWithSelector(ZoraSignatureMinterStrategy.setSale.selector, salesConfig));
         vm.stopPrank();
     }
 
