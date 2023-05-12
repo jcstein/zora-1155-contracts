@@ -49,9 +49,9 @@ contract ZoraSignatureMinterStrategy is Enjoy, SaleStrategy, LimitedMintPerAddre
 
     /// @notice General signatue sale settings
     struct SalesConfig {
+        /// @notice Registry that decides which account is authorized to sign signatures
+        /// to mint for the sale
         IAuthRegistry authorizedSignatureCreators;
-        /// @notice Funds recipient (0 if no different funds recipient than the contract global)
-        address fundsRecipient;
     }
 
     // target -> settings
@@ -70,7 +70,9 @@ contract ZoraSignatureMinterStrategy is Enjoy, SaleStrategy, LimitedMintPerAddre
     error Expired(uint256 expiration);
 
     bytes32 constant REQUEST_MINT_TYPEHASH =
-        keccak256("requestMint(address target,uint256 tokenId,bytes32 nonce,uint256 quantity,uint256 pricePerToken,uint256 expiration,address mintTo)");
+        keccak256(
+            "requestMint(address target,uint256 tokenId,bytes32 nonce,uint256 quantity,uint256 pricePerToken,uint256 expiration,address mintTo,address fundRecipient)"
+        );
 
     /// @notice ContractURI for contract information with the strategy
     function contractURI() external pure override returns (string memory) {
@@ -104,12 +106,12 @@ contract ZoraSignatureMinterStrategy is Enjoy, SaleStrategy, LimitedMintPerAddre
     ) external returns (ICreatorCommands.CommandSet memory) {
         address target = msg.sender;
         // these arguments are what don't fit into the standard requestMint Args
-        (bytes32 nonce, uint256 pricePerToken, uint256 expiration, address mintTo, bytes memory signature) = abi.decode(
+        (bytes32 nonce, uint256 pricePerToken, uint256 expiration, address mintTo, address fundsRecipient, bytes memory signature) = abi.decode(
             minterArguments,
-            (bytes32, uint256, uint256, address, bytes)
+            (bytes32, uint256, uint256, address, address, bytes)
         );
 
-        address signer = _recover(target, tokenId, nonce, quantity, pricePerToken, expiration, mintTo, signature);
+        address signer = _recover(target, tokenId, nonce, quantity, pricePerToken, expiration, mintTo, fundsRecipient, signature);
 
         // do we need this setting to be there for each token, or just be the same across the board?
         if (signer == address(0) || !isAuthorizedToSign(signer, target)) {
@@ -132,7 +134,7 @@ contract ZoraSignatureMinterStrategy is Enjoy, SaleStrategy, LimitedMintPerAddre
             revert WrongValueSent(quantity * pricePerToken, ethValueSent);
         }
 
-        return _executeMintAndTransferFunds(target, tokenId, quantity, mintTo, ethValueSent);
+        return _executeMintAndTransferFunds(target, tokenId, quantity, mintTo, ethValueSent, fundsRecipient);
     }
 
     /// Helper utility to encode additional arguments needed to send to mint
@@ -146,9 +148,10 @@ contract ZoraSignatureMinterStrategy is Enjoy, SaleStrategy, LimitedMintPerAddre
         uint256 pricePerToken,
         uint256 expiration,
         address mintTo,
+        address fundsRecipient,
         bytes memory signature
     ) external pure returns (bytes memory) {
-        return abi.encode(nonce, pricePerToken, expiration, mintTo, signature);
+        return abi.encode(nonce, pricePerToken, expiration, mintTo, fundsRecipient, signature);
     }
 
     /// Used to create a hash of the data for the requestMint function,
@@ -160,9 +163,10 @@ contract ZoraSignatureMinterStrategy is Enjoy, SaleStrategy, LimitedMintPerAddre
         uint256 quantity,
         uint256 pricePerToken,
         uint256 expiration,
-        address mintTo
+        address mintTo,
+        address fundsRecipient
     ) public view returns (bytes32) {
-        bytes32 structHash = keccak256(abi.encode(REQUEST_MINT_TYPEHASH, target, nonce, tokenId, quantity, pricePerToken, expiration, mintTo));
+        bytes32 structHash = keccak256(abi.encode(REQUEST_MINT_TYPEHASH, target, nonce, tokenId, quantity, pricePerToken, expiration, mintTo, fundsRecipient));
 
         return _hashTypedDataV4(structHash);
     }
@@ -175,9 +179,10 @@ contract ZoraSignatureMinterStrategy is Enjoy, SaleStrategy, LimitedMintPerAddre
         uint256 pricePerToken,
         uint256 expiration,
         address mintTo,
+        address fundRecipient,
         bytes memory signature
     ) private view returns (address) {
-        bytes32 digest = delegateCreateContractHashTypeData(target, tokenId, nonce, quantity, pricePerToken, expiration, mintTo);
+        bytes32 digest = delegateCreateContractHashTypeData(target, tokenId, nonce, quantity, pricePerToken, expiration, mintTo, fundRecipient);
 
         return ECDSA.recover(digest, signature);
     }
@@ -191,9 +196,9 @@ contract ZoraSignatureMinterStrategy is Enjoy, SaleStrategy, LimitedMintPerAddre
         uint256 tokenId,
         uint256 quantity,
         address mintTo,
-        uint256 ethValueSent
-    ) private view returns (ICreatorCommands.CommandSet memory commands) {
-        address fundsRecipient = signatureSaleSettings[target].fundsRecipient;
+        uint256 ethValueSent,
+        address fundsRecipient
+    ) private pure returns (ICreatorCommands.CommandSet memory commands) {
         // Should transfer funds if funds recipient is set to a non-default address
         bool shouldTransferFunds = fundsRecipient != address(0);
 

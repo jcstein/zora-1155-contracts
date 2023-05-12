@@ -69,10 +69,7 @@ contract ZoraSignatureMinterStategyTest is Test {
         target.addPermission(newTokenId, address(signatureMinter), target.PERMISSION_BIT_MINTER());
         vm.expectEmit(true, true, true, true);
 
-        ZoraSignatureMinterStrategy.SalesConfig memory salesConfig = ZoraSignatureMinterStrategy.SalesConfig({
-            authorizedSignatureCreators: authRegistry,
-            fundsRecipient: fundsRecipient
-        });
+        ZoraSignatureMinterStrategy.SalesConfig memory salesConfig = ZoraSignatureMinterStrategy.SalesConfig({authorizedSignatureCreators: authRegistry});
 
         emit SaleSet(address(target), salesConfig);
 
@@ -85,10 +82,7 @@ contract ZoraSignatureMinterStategyTest is Test {
         newTokenId = target.setupNewToken("https://zora.co/testing/token.json", maxSupply);
         target.addPermission(newTokenId, address(signatureMinter), target.PERMISSION_BIT_MINTER());
 
-        ZoraSignatureMinterStrategy.SalesConfig memory salesConfig = ZoraSignatureMinterStrategy.SalesConfig({
-            authorizedSignatureCreators: _authRegistry,
-            fundsRecipient: fundsRecipient
-        });
+        ZoraSignatureMinterStrategy.SalesConfig memory salesConfig = ZoraSignatureMinterStrategy.SalesConfig({authorizedSignatureCreators: _authRegistry});
 
         target.callSale(newTokenId, signatureMinter, abi.encodeWithSelector(ZoraSignatureMinterStrategy.setSale.selector, salesConfig));
         vm.stopPrank();
@@ -114,9 +108,19 @@ contract ZoraSignatureMinterStategyTest is Test {
         uint256 quantity,
         uint256 pricePerToken,
         uint256 expiration,
-        address mintTo
+        address mintTo,
+        address _fundsRecipient
     ) private view returns (bytes memory) {
-        bytes32 digest = signatureMinter.delegateCreateContractHashTypeData(_target, tokenId, nonce, quantity, pricePerToken, expiration, mintTo);
+        bytes32 digest = signatureMinter.delegateCreateContractHashTypeData(
+            _target,
+            tokenId,
+            nonce,
+            quantity,
+            pricePerToken,
+            expiration,
+            mintTo,
+            _fundsRecipient
+        );
 
         // generate signature for hash using creators private key
         return _sign(signer, digest);
@@ -131,6 +135,7 @@ contract ZoraSignatureMinterStategyTest is Test {
         uint256 pricePerToken;
         uint256 expiration;
         address mintTo;
+        address fundsRecipient;
     }
 
     function _signMintRequestAndGetMintParams(SignMintAndRequestParam memory params) private view returns (bytes memory minterArguments, uint256 mintValue) {
@@ -143,11 +148,19 @@ contract ZoraSignatureMinterStategyTest is Test {
             params.quantity,
             params.pricePerToken,
             params.expiration,
-            params.mintTo
+            params.mintTo,
+            params.fundsRecipient
         );
 
         // build minter arguments, which are to be used for minting:
-        minterArguments = signatureMinter.encodeMinterArgumets(params.nonce, params.pricePerToken, params.expiration, params.mintTo, signature);
+        minterArguments = signatureMinter.encodeMinterArgumets(
+            params.nonce,
+            params.pricePerToken,
+            params.expiration,
+            params.mintTo,
+            params.fundsRecipient,
+            signature
+        );
 
         // compute mint value:
         mintValue = params.pricePerToken * params.quantity;
@@ -175,7 +188,17 @@ contract ZoraSignatureMinterStategyTest is Test {
 
         // generate signature for data using creators private key
         (bytes memory minterArguments, uint256 mintValue) = _signMintRequestAndGetMintParams(
-            SignMintAndRequestParam(authorizedSignerPrivateKey, address(target), tokenId, randomBytes, quantity, pricePerToken, expiration, mintTo)
+            SignMintAndRequestParam(
+                authorizedSignerPrivateKey,
+                address(target),
+                tokenId,
+                randomBytes,
+                quantity,
+                pricePerToken,
+                expiration,
+                mintTo,
+                fundsRecipient
+            )
         );
 
         address executorAddress = vm.addr(12314324123);
@@ -218,7 +241,8 @@ contract ZoraSignatureMinterStategyTest is Test {
             quantity,
             pricePerToken,
             expiration,
-            mintTo
+            mintTo,
+            fundsRecipient
         );
 
         // generate signature for hash using creators private key, and get mint arguments
@@ -261,9 +285,10 @@ contract ZoraSignatureMinterStategyTest is Test {
         bool quantityWrong,
         bool experitionWrong,
         bool mintToWrong,
-        bool randomBytesWrong
+        bool randomBytesWrong,
+        bool fundsRecipientWrong
     ) external {
-        vm.assume(nonAuthorizedSigner || tokenIdWrong || quantityWrong || experitionWrong || mintToWrong || randomBytesWrong);
+        vm.assume(nonAuthorizedSigner || tokenIdWrong || quantityWrong || experitionWrong || mintToWrong || randomBytesWrong || fundsRecipientWrong);
         uint256 pricePerToken = 2 ether;
         uint64 quantity = 4;
         uint64 maxSupply = 10;
@@ -282,7 +307,7 @@ contract ZoraSignatureMinterStategyTest is Test {
 
         {
             // create the signature from an authorized signer with the original correct data
-            signature = _signMintRequest(privateKeyToUse, address(target), tokenId, randomBytes, quantity, pricePerToken, expiration, mintTo);
+            signature = _signMintRequest(privateKeyToUse, address(target), tokenId, randomBytes, quantity, pricePerToken, expiration, mintTo, fundsRecipient);
         }
 
         // store the mint value before affecting price per token below
@@ -309,10 +334,13 @@ contract ZoraSignatureMinterStategyTest is Test {
             if (pricePerTokenWrong) {
                 pricePerToken = pricePerToken + 1;
             }
+            if (fundsRecipientWrong) {
+                fundsRecipient = payable(vm.addr(12345));
+            }
         }
 
         // now build the calldata
-        bytes memory minterArguments = abi.encode(randomBytes, pricePerToken, expiration, mintTo, signature);
+        bytes memory minterArguments = signatureMinter.encodeMinterArgumets(randomBytes, pricePerToken, expiration, mintTo, fundsRecipient, signature);
 
         address executorAddress = vm.addr(12314324123);
         vm.deal(executorAddress, mintValue);
@@ -345,7 +373,8 @@ contract ZoraSignatureMinterStategyTest is Test {
             quantity,
             pricePerToken,
             expiration,
-            mintTo
+            mintTo,
+            fundsRecipient
         );
 
         (bytes memory minterArguments, uint256 mintValue) = _signMintRequestAndGetMintParams(callParams);
@@ -382,7 +411,8 @@ contract ZoraSignatureMinterStategyTest is Test {
             quantity,
             pricePerToken,
             expiration,
-            mintTo
+            mintTo,
+            fundsRecipient
         );
 
         (bytes memory minterArguments, uint256 mintValue) = _signMintRequestAndGetMintParams(callParams);
