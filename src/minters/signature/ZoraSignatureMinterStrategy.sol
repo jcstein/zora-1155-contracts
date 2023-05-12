@@ -11,6 +11,7 @@ import {SaleCommandHelper} from "../utils/SaleCommandHelper.sol";
 import {LimitedMintPerAddress} from "../utils/LimitedMintPerAddress.sol";
 import {EIP712} from "@openzeppelin/contracts/utils/cryptography/EIP712.sol";
 import {ECDSA} from "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
+import {IReadableAuthRegistry} from "../../interfaces/IAuthRegistry.sol";
 
 /*
 
@@ -37,10 +38,6 @@ import {ECDSA} from "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
 
  */
 
-interface IAuthRegistry {
-    function isAuthorized(address account) external view returns (bool);
-}
-
 /// @title ZoraSignatureMinterStrategy
 /// @notice Mints tokens based on signature created by an authorized signer
 /// @author @oveddan
@@ -51,7 +48,7 @@ contract ZoraSignatureMinterStrategy is Enjoy, SaleStrategy, LimitedMintPerAddre
     struct SalesConfig {
         /// @notice Registry that decides which account is authorized to sign signatures
         /// to mint for the sale
-        IAuthRegistry authorizedSignatureCreators;
+        IReadableAuthRegistry authorizedSignatureCreators;
     }
 
     // target -> settings

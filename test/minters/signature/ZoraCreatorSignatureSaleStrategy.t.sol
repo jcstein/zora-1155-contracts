@@ -9,10 +9,11 @@ import {IMinter1155} from "../../../src/interfaces/IMinter1155.sol";
 import {ICreatorRoyaltiesControl} from "../../../src/interfaces/ICreatorRoyaltiesControl.sol";
 import {IZoraCreator1155Factory} from "../../../src/interfaces/IZoraCreator1155Factory.sol";
 import {ILimitedMintPerAddress} from "../../../src/interfaces/ILimitedMintPerAddress.sol";
-import {ZoraSignatureMinterStrategy, IAuthRegistry} from "../../../src/minters/signature/ZoraSignatureMinterStrategy.sol";
+import {ZoraSignatureMinterStrategy} from "../../../src/minters/signature/ZoraSignatureMinterStrategy.sol";
+import {IReadableAuthRegistry} from "../../../src/interfaces/IAuthRegistry.sol";
 import {ECDSA} from "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
 
-contract MockAuthRegistry is IAuthRegistry {
+contract MockAuthRegistry is IReadableAuthRegistry {
     mapping(address => bool) public auth;
 
     constructor() {}
@@ -37,7 +38,7 @@ contract ZoraSignatureMinterStategyTest is Test {
     address payable internal fundsRecipient = payable(address(0x321));
     uint256 currentTime = 1000;
 
-    IAuthRegistry internal authRegistry;
+    IReadableAuthRegistry internal authRegistry;
 
     event SaleSet(address indexed mediaContract, ZoraSignatureMinterStrategy.SalesConfig salesConfig);
     event MintComment(address indexed sender, address indexed tokenContract, uint256 indexed tokenId, uint256 quantity, string comment);
@@ -77,7 +78,7 @@ contract ZoraSignatureMinterStategyTest is Test {
         vm.stopPrank();
     }
 
-    function _setupTokenAndSignatureMinterWithAuthRegistry(uint256 maxSupply, IAuthRegistry _authRegistry) private returns (uint256 newTokenId) {
+    function _setupTokenAndSignatureMinterWithAuthRegistry(uint256 maxSupply, IReadableAuthRegistry _authRegistry) private returns (uint256 newTokenId) {
         vm.startPrank(admin);
         newTokenId = target.setupNewToken("https://zora.co/testing/token.json", maxSupply);
         target.addPermission(newTokenId, address(signatureMinter), target.PERMISSION_BIT_MINTER());
