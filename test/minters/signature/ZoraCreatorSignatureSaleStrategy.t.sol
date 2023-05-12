@@ -155,12 +155,14 @@ contract ZoraSignatureMinterStategyTest is Test {
 
         // build minter arguments, which are to be used for minting:
         minterArguments = signatureMinter.encodeMinterArgumets(
-            params.nonce,
-            params.pricePerToken,
-            params.expiration,
-            params.mintTo,
-            params.fundsRecipient,
-            signature
+            ZoraSignatureMinterStrategy.MintRequestCallData(
+                params.nonce,
+                params.pricePerToken,
+                params.expiration,
+                params.mintTo,
+                params.fundsRecipient,
+                signature
+            )
         );
 
         // compute mint value:
@@ -286,10 +288,9 @@ contract ZoraSignatureMinterStategyTest is Test {
         bool quantityWrong,
         bool experitionWrong,
         bool mintToWrong,
-        bool randomBytesWrong,
-        bool fundsRecipientWrong
+        bool randomBytesWrong
     ) external {
-        vm.assume(nonAuthorizedSigner || tokenIdWrong || quantityWrong || experitionWrong || mintToWrong || randomBytesWrong || fundsRecipientWrong);
+        vm.assume(nonAuthorizedSigner || tokenIdWrong || quantityWrong || experitionWrong || mintToWrong || randomBytesWrong);
         uint256 pricePerToken = 2 ether;
         uint64 quantity = 4;
         uint64 maxSupply = 10;
@@ -335,13 +336,12 @@ contract ZoraSignatureMinterStategyTest is Test {
             if (pricePerTokenWrong) {
                 pricePerToken = pricePerToken + 1;
             }
-            if (fundsRecipientWrong) {
-                fundsRecipient = payable(vm.addr(12345));
-            }
         }
 
         // now build the calldata
-        bytes memory minterArguments = signatureMinter.encodeMinterArgumets(randomBytes, pricePerToken, expiration, mintTo, fundsRecipient, signature);
+        bytes memory minterArguments = signatureMinter.encodeMinterArgumets(
+            ZoraSignatureMinterStrategy.MintRequestCallData(randomBytes, pricePerToken, expiration, mintTo, fundsRecipient, signature)
+        );
 
         address executorAddress = vm.addr(12314324123);
         vm.deal(executorAddress, mintValue);

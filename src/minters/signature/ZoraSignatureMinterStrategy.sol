@@ -88,6 +88,20 @@ contract ZoraSignatureMinterStrategy is Enjoy, SaleStrategy, LimitedMintPerAddre
 
     constructor() EIP712("ZoraSignatureMinterStrategy", "1") {}
 
+    struct MintRequestCallData {
+        /// @param nonce Unique id of the mint included in the signature
+        bytes32 nonce;
+        /// @param pricePerToken Price per token
+        uint256 pricePerToken;
+        /// @param expiration When signature expires
+        uint256 expiration;
+        /// @param mintTo Which account should receive the mint
+        address mintTo;
+        address fundsRecipient;
+        /// @param signature The signature created by the authorized signer
+        bytes signature;
+    }
+
     /// @notice Compiles and returns the commands needed to mint a token using this sales strategy.  Requires a signature
     /// to have been created off-chain by an authorized signer.
     /// @param tokenId The token ID to mint
@@ -103,12 +117,19 @@ contract ZoraSignatureMinterStrategy is Enjoy, SaleStrategy, LimitedMintPerAddre
     ) external returns (ICreatorCommands.CommandSet memory) {
         address target = msg.sender;
         // these arguments are what don't fit into the standard requestMint Args
-        (bytes32 nonce, uint256 pricePerToken, uint256 expiration, address mintTo, address fundsRecipient, bytes memory signature) = abi.decode(
-            minterArguments,
-            (bytes32, uint256, uint256, address, address, bytes)
-        );
+        MintRequestCallData memory mintRequestCalldata = abi.decode(minterArguments, (MintRequestCallData));
 
-        address signer = _recover(target, tokenId, nonce, quantity, pricePerToken, expiration, mintTo, fundsRecipient, signature);
+        address signer = _recover(
+            target,
+            tokenId,
+            mintRequestCalldata.nonce,
+            quantity,
+            mintRequestCalldata.pricePerToken,
+            mintRequestCalldata.expiration,
+            mintRequestCalldata.mintTo,
+            mintRequestCalldata.fundsRecipient,
+            mintRequestCalldata.signature
+        );
 
         // do we need this setting to be there for each token, or just be the same across the board?
         if (signer == address(0) || !isAuthorizedToSign(signer, target)) {
@@ -116,39 +137,27 @@ contract ZoraSignatureMinterStrategy is Enjoy, SaleStrategy, LimitedMintPerAddre
         }
 
         // do we need this to be also unique per signer?
-        if (minted[target][nonce]) {
+        if (minted[target][mintRequestCalldata.nonce]) {
             revert AlreadyMinted();
         }
-        minted[target][nonce] = true;
+        minted[target][mintRequestCalldata.nonce] = true;
 
         // validate that the mint hasn't expired
-        if (block.timestamp > expiration) {
-            revert Expired(expiration);
+        if (block.timestamp > mintRequestCalldata.expiration) {
+            revert Expired(mintRequestCalldata.expiration);
         }
 
         // validate that proper value was sent
-        if (quantity * pricePerToken != ethValueSent) {
-            revert WrongValueSent(quantity * pricePerToken, ethValueSent);
+        if (quantity * mintRequestCalldata.pricePerToken != ethValueSent) {
+            revert WrongValueSent(quantity * mintRequestCalldata.pricePerToken, ethValueSent);
         }
 
-        return _executeMintAndTransferFunds(target, tokenId, quantity, mintTo, ethValueSent, fundsRecipient);
+        return _executeMintAndTransferFunds(target, tokenId, quantity, mintRequestCalldata.mintTo, ethValueSent, mintRequestCalldata.fundsRecipient);
     }
 
     /// Helper utility to encode additional arguments needed to send to mint
-    /// @param nonce Unique id of the mint included in the signature
-    /// @param pricePerToken Price per token
-    /// @param expiration When signature expires
-    /// @param mintTo Which account should receive the mint
-    /// @param signature The signature created by the authorized signer
-    function encodeMinterArgumets(
-        bytes32 nonce,
-        uint256 pricePerToken,
-        uint256 expiration,
-        address mintTo,
-        address fundsRecipient,
-        bytes memory signature
-    ) external pure returns (bytes memory) {
-        return abi.encode(nonce, pricePerToken, expiration, mintTo, fundsRecipient, signature);
+    function encodeMinterArgumets(MintRequestCallData calldata mintRequestCalldata) external pure returns (bytes memory) {
+        return abi.encode(mintRequestCalldata);
     }
 
     /// Used to create a hash of the data for the requestMint function,
