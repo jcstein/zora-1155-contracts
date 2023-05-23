@@ -491,8 +491,6 @@ contract ZoraSignatureMinterStategyTest is Test {
         bytes32 randomBytes = bytes32(uint256(123123));
         uint256 expiration = currentTime + 5;
 
-        address newFundsRecipient = payable(address(0));
-
         // generate signature for data using creators private key
         (bytes memory minterArguments, , uint256 toSend) = _signMintRequestAndGetMintParams(
             SignMintAndRequestParam(
@@ -504,7 +502,7 @@ contract ZoraSignatureMinterStategyTest is Test {
                 pricePerToken,
                 expiration,
                 mintTo,
-                newFundsRecipient
+                payable(address(0))
             )
         );
 
