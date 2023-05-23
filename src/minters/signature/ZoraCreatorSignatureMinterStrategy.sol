@@ -38,10 +38,10 @@ import {IReadableAuthRegistry} from "../../interfaces/IAuthRegistry.sol";
 
  */
 
-/// @title ZoraSignatureMinterStrategy
+/// @title ZoraCreatorSignatureMinterStrategy
 /// @notice Mints tokens based on signature created by an authorized signer
 /// @author @oveddan
-contract ZoraSignatureMinterStrategy is Enjoy, SaleStrategy, LimitedMintPerAddress, EIP712 {
+contract ZoraCreatorSignatureMinterStrategy is Enjoy, SaleStrategy, LimitedMintPerAddress, EIP712 {
     using SaleCommandHelper for ICreatorCommands.CommandSet;
 
     /// @notice General signatue sale settings

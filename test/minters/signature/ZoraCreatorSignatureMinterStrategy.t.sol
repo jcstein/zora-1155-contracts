@@ -9,7 +9,7 @@ import {IMinter1155} from "../../../src/interfaces/IMinter1155.sol";
 import {ICreatorRoyaltiesControl} from "../../../src/interfaces/ICreatorRoyaltiesControl.sol";
 import {IZoraCreator1155Factory} from "../../../src/interfaces/IZoraCreator1155Factory.sol";
 import {ILimitedMintPerAddress} from "../../../src/interfaces/ILimitedMintPerAddress.sol";
-import {ZoraSignatureMinterStrategy} from "../../../src/minters/signature/ZoraSignatureMinterStrategy.sol";
+import {ZoraCreatorSignatureMinterStrategy} from "../../../src/minters/signature/ZoraCreatorSignatureMinterStrategy.sol";
 import {IReadableAuthRegistry} from "../../../src/interfaces/IAuthRegistry.sol";
 import {ECDSA} from "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
 
@@ -29,7 +29,7 @@ contract MockAuthRegistry is IReadableAuthRegistry {
 
 contract ZoraSignatureMinterStategyTest is Test {
     ZoraCreator1155Impl internal target;
-    ZoraSignatureMinterStrategy internal signatureMinter;
+    ZoraCreatorSignatureMinterStrategy internal signatureMinter;
     address payable internal admin = payable(address(0x999));
 
     uint256 authorizedSignerPrivateKey = 0xA11CE;
@@ -40,7 +40,7 @@ contract ZoraSignatureMinterStategyTest is Test {
 
     IReadableAuthRegistry internal authRegistry;
 
-    event SaleSet(address indexed mediaContract, ZoraSignatureMinterStrategy.SalesConfig salesConfig);
+    event SaleSet(address indexed mediaContract, ZoraCreatorSignatureMinterStrategy.SalesConfig salesConfig);
     event MintComment(address indexed sender, address indexed tokenContract, uint256 indexed tokenId, uint256 quantity, string comment);
 
     uint256 mintFeeAmount = 0.001 ether;
@@ -55,7 +55,7 @@ contract ZoraSignatureMinterStategyTest is Test {
         Zora1155 proxy = new Zora1155(address(targetImpl));
         target = ZoraCreator1155Impl(address(proxy));
         target.initialize("test2", "test", ICreatorRoyaltiesControl.RoyaltyConfiguration(0, 0, address(0)), admin, emptyData);
-        signatureMinter = new ZoraSignatureMinterStrategy();
+        signatureMinter = new ZoraCreatorSignatureMinterStrategy();
         authRegistry = new MockAuthRegistry();
         MockAuthRegistry(address(authRegistry)).addAuthorized(authorizedSigner);
         // set the time to be the current time
@@ -76,11 +76,13 @@ contract ZoraSignatureMinterStategyTest is Test {
         target.addPermission(newTokenId, address(signatureMinter), target.PERMISSION_BIT_MINTER());
         vm.expectEmit(true, true, true, true);
 
-        ZoraSignatureMinterStrategy.SalesConfig memory salesConfig = ZoraSignatureMinterStrategy.SalesConfig({authorizedSignatureCreators: authRegistry});
+        ZoraCreatorSignatureMinterStrategy.SalesConfig memory salesConfig = ZoraCreatorSignatureMinterStrategy.SalesConfig({
+            authorizedSignatureCreators: authRegistry
+        });
 
         emit SaleSet(address(target), salesConfig);
 
-        target.callSale(newTokenId, signatureMinter, abi.encodeWithSelector(ZoraSignatureMinterStrategy.setSale.selector, salesConfig));
+        target.callSale(newTokenId, signatureMinter, abi.encodeWithSelector(ZoraCreatorSignatureMinterStrategy.setSale.selector, salesConfig));
         vm.stopPrank();
     }
 
@@ -89,9 +91,11 @@ contract ZoraSignatureMinterStategyTest is Test {
         newTokenId = target.setupNewToken("https://zora.co/testing/token.json", maxSupply);
         target.addPermission(newTokenId, address(signatureMinter), target.PERMISSION_BIT_MINTER());
 
-        ZoraSignatureMinterStrategy.SalesConfig memory salesConfig = ZoraSignatureMinterStrategy.SalesConfig({authorizedSignatureCreators: _authRegistry});
+        ZoraCreatorSignatureMinterStrategy.SalesConfig memory salesConfig = ZoraCreatorSignatureMinterStrategy.SalesConfig({
+            authorizedSignatureCreators: _authRegistry
+        });
 
-        target.callSale(newTokenId, signatureMinter, abi.encodeWithSelector(ZoraSignatureMinterStrategy.setSale.selector, salesConfig));
+        target.callSale(newTokenId, signatureMinter, abi.encodeWithSelector(ZoraCreatorSignatureMinterStrategy.setSale.selector, salesConfig));
         vm.stopPrank();
     }
 
@@ -163,7 +167,7 @@ contract ZoraSignatureMinterStategyTest is Test {
 
         // build minter arguments, which are to be used for minting:
         minterArguments = signatureMinter.encodeMinterArguments(
-            ZoraSignatureMinterStrategy.MintRequestCallData(
+            ZoraCreatorSignatureMinterStrategy.MintRequestCallData(
                 params.nonce,
                 params.pricePerToken,
                 params.expiration,
@@ -271,7 +275,7 @@ contract ZoraSignatureMinterStategyTest is Test {
             // deal some more eth to the executor, and mint again, it should revert
             vm.deal(executorAddress, toSend);
             vm.prank(executorAddress);
-            vm.expectRevert(ZoraSignatureMinterStrategy.AlreadyMinted.selector);
+            vm.expectRevert(ZoraCreatorSignatureMinterStrategy.AlreadyMinted.selector);
             target.mint{value: toSend}(signatureMinter, tokenId, quantity, minterArguments);
         }
 
@@ -351,7 +355,7 @@ contract ZoraSignatureMinterStategyTest is Test {
 
         // now build the calldata
         bytes memory minterArguments = signatureMinter.encodeMinterArguments(
-            ZoraSignatureMinterStrategy.MintRequestCallData(randomBytes, pricePerToken, expiration, mintTo, fundsRecipient, signature)
+            ZoraCreatorSignatureMinterStrategy.MintRequestCallData(randomBytes, pricePerToken, expiration, mintTo, fundsRecipient, signature)
         );
 
         address executorAddress = vm.addr(12314324123);
@@ -359,7 +363,7 @@ contract ZoraSignatureMinterStategyTest is Test {
         vm.prank(executorAddress);
 
         // should revert with invalid signature
-        vm.expectRevert(ZoraSignatureMinterStrategy.InvalidSignature.selector);
+        vm.expectRevert(ZoraCreatorSignatureMinterStrategy.InvalidSignature.selector);
         target.mint{value: mintValue}(signatureMinter, tokenId, quantity, minterArguments);
     }
 
@@ -399,7 +403,7 @@ contract ZoraSignatureMinterStategyTest is Test {
         vm.prank(executorAddress);
 
         // should revert with expired
-        vm.expectRevert(abi.encodeWithSelector(ZoraSignatureMinterStrategy.Expired.selector, expiration));
+        vm.expectRevert(abi.encodeWithSelector(ZoraCreatorSignatureMinterStrategy.Expired.selector, expiration));
         target.mint{value: toSend}(signatureMinter, tokenId, quantity, minterArguments);
     }
 
@@ -510,7 +514,7 @@ contract ZoraSignatureMinterStategyTest is Test {
         vm.deal(executorAddress, toSend);
         vm.prank(executorAddress);
 
-        vm.expectRevert(ZoraSignatureMinterStrategy.MissingFundsRecipient.selector);
+        vm.expectRevert(ZoraCreatorSignatureMinterStrategy.MissingFundsRecipient.selector);
         target.mint{value: toSend}(signatureMinter, tokenId, quantity, minterArguments);
     }
 }
