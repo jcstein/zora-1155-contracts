@@ -157,7 +157,7 @@ contract ZoraSignatureMinterStrategy is Enjoy, SaleStrategy, LimitedMintPerAddre
     }
 
     /// Helper utility to encode additional arguments needed to send to mint
-    function encodeMinterArgumets(MintRequestCallData calldata mintRequestCalldata) external pure returns (bytes memory) {
+    function encodeMinterArguments(MintRequestCallData calldata mintRequestCalldata) external pure returns (bytes memory) {
         return abi.encode(mintRequestCalldata);
     }
 

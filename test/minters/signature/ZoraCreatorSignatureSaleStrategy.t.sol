@@ -162,7 +162,7 @@ contract ZoraSignatureMinterStategyTest is Test {
         );
 
         // build minter arguments, which are to be used for minting:
-        minterArguments = signatureMinter.encodeMinterArgumets(
+        minterArguments = signatureMinter.encodeMinterArguments(
             ZoraSignatureMinterStrategy.MintRequestCallData(
                 params.nonce,
                 params.pricePerToken,
@@ -350,7 +350,7 @@ contract ZoraSignatureMinterStategyTest is Test {
         uint256 toSend = mintValue + mintFeeAmount * quantity;
 
         // now build the calldata
-        bytes memory minterArguments = signatureMinter.encodeMinterArgumets(
+        bytes memory minterArguments = signatureMinter.encodeMinterArguments(
             ZoraSignatureMinterStrategy.MintRequestCallData(randomBytes, pricePerToken, expiration, mintTo, fundsRecipient, signature)
         );
 
