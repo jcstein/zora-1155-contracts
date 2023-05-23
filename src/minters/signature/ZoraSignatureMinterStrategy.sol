@@ -64,6 +64,7 @@ contract ZoraSignatureMinterStrategy is Enjoy, SaleStrategy, LimitedMintPerAddre
     error WrongValueSent(uint256 expectedValue, uint256 valueSent);
     error InvalidSignature();
     error AlreadyMinted();
+    error MissingFundsRecipient();
     error Expired(uint256 expiration);
 
     bytes32 constant REQUEST_MINT_TYPEHASH =
@@ -152,7 +153,7 @@ contract ZoraSignatureMinterStrategy is Enjoy, SaleStrategy, LimitedMintPerAddre
             revert WrongValueSent(quantity * mintRequestCalldata.pricePerToken, ethValueSent);
         }
 
-        return _executeMintAndTransferFunds(target, tokenId, quantity, mintRequestCalldata.mintTo, ethValueSent, mintRequestCalldata.fundsRecipient);
+        return _executeMintAndTransferFunds(tokenId, quantity, mintRequestCalldata.mintTo, ethValueSent, mintRequestCalldata.fundsRecipient);
     }
 
     /// Helper utility to encode additional arguments needed to send to mint
@@ -198,7 +199,6 @@ contract ZoraSignatureMinterStrategy is Enjoy, SaleStrategy, LimitedMintPerAddre
     }
 
     function _executeMintAndTransferFunds(
-        address target,
         uint256 tokenId,
         uint256 quantity,
         address mintTo,
@@ -206,7 +206,7 @@ contract ZoraSignatureMinterStrategy is Enjoy, SaleStrategy, LimitedMintPerAddre
         address fundsRecipient
     ) private pure returns (ICreatorCommands.CommandSet memory commands) {
         // Should transfer funds if funds recipient is set to a non-default address
-        bool shouldTransferFunds = fundsRecipient != address(0);
+        bool shouldTransferFunds = ethValueSent > 0;
 
         // Setup contract commands
         commands.setSize(shouldTransferFunds ? 2 : 1);
@@ -215,6 +215,7 @@ contract ZoraSignatureMinterStrategy is Enjoy, SaleStrategy, LimitedMintPerAddre
 
         // If we have a non-default funds recipient for this token
         if (shouldTransferFunds) {
+            if (fundsRecipient == address(0)) revert MissingFundsRecipient();
             commands.transfer(fundsRecipient, ethValueSent);
         }
     }
