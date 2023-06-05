@@ -298,7 +298,7 @@ contract ZoraSignatureMinterStategyTest is Test {
         signature = _signMintRequest(privateKeyToUse, address(target), tokenId, randomBytes, quantity, pricePerToken, expiration, mintTo, fundsRecipient);
 
         // store the mint value before affecting price per token below
-        uint256 mintValue = uint256(pricePerToken) * quantity;
+        // uint256 mintValue = uint256(pricePerToken) * quantity;
 
         // now start messing with the data
         if (signatureIssue == 2) {
@@ -316,7 +316,7 @@ contract ZoraSignatureMinterStategyTest is Test {
             randomBytes = _flipBytes(randomBytes);
         }
 
-        uint256 toSend = mintValue + mintFeeAmount * quantity;
+        uint256 toSend = uint256(pricePerToken) * quantity + mintFeeAmount * quantity;
 
         // now build the calldata
         bytes memory minterArguments = signatureMinter.encodeMinterArguments(
@@ -329,7 +329,7 @@ contract ZoraSignatureMinterStategyTest is Test {
 
         // should revert with invalid signature
         vm.expectRevert(ZoraCreatorSignatureMinterStrategy.InvalidSignature.selector);
-        target.mint{value: mintValue}(signatureMinter, tokenId, quantity, minterArguments);
+        target.mint{value: toSend}(signatureMinter, tokenId, quantity, minterArguments);
     }
 
     function test_mint_revertsWhen_expired(uint128 expirationInFuture, uint8 timeSinceExpired) external {
