@@ -274,16 +274,10 @@ contract ZoraSignatureMinterStategyTest is Test {
         assertEq(target.balanceOf(mintTo, tokenId), 20);
     }
 
-    function test_mint_revertsWhen_invalidSignature(
-        bool nonAuthorizedSigner,
-        bool tokenIdWrong,
-        bool pricePerTokenWrong,
-        bool quantityWrong,
-        bool experitionWrong,
-        bool mintToWrong,
-        bool randomBytesWrong
-    ) external {
-        vm.assume(nonAuthorizedSigner || tokenIdWrong || quantityWrong || experitionWrong || mintToWrong || randomBytesWrong);
+    function test_mint_revertsWhen_invalidSignature(uint8 signatureIssue) external {
+        // signatureIssue is a number 1-7 which refers to the reason the signature is invalid
+        // 1 = non authorized signer, 2 = tokenId wrong, 3 = pricePerToken wrong, 4 = quantity wrong, 5 = expiration wrong, 6 = mintTo wrong, 7 = randomBytes wrong
+        vm.assume(signatureIssue > 0 && signatureIssue < 8);
         uint256 pricePerToken = 2 ether;
         uint64 quantity = 4;
         uint64 maxSupply = 10;
@@ -296,39 +290,30 @@ contract ZoraSignatureMinterStategyTest is Test {
         uint256 tokenId = _setupTokenAndSignatureMinter(maxSupply);
 
         // if non authorized signer, change private key to use to another private key thats not authorized
-        uint256 privateKeyToUse = nonAuthorizedSigner ? 0xA11CD : authorizedSignerPrivateKey;
+        uint256 privateKeyToUse = signatureIssue == 1 ? 0xA11CD : authorizedSignerPrivateKey;
 
         bytes memory signature;
 
-        {
-            // create the signature from an authorized signer with the original correct data
-            signature = _signMintRequest(privateKeyToUse, address(target), tokenId, randomBytes, quantity, pricePerToken, expiration, mintTo, fundsRecipient);
-        }
+        // create the signature from an authorized signer with the original correct data
+        signature = _signMintRequest(privateKeyToUse, address(target), tokenId, randomBytes, quantity, pricePerToken, expiration, mintTo, fundsRecipient);
 
         // store the mint value before affecting price per token below
         uint256 mintValue = uint256(pricePerToken) * quantity;
 
-        {
-            // now start messing with the data
-            if (tokenIdWrong) {
-                tokenId = _setupTokenAndSignatureMinter(maxSupply);
-            }
-            if (quantityWrong) {
-                quantity = quantity + 1;
-            }
-            if (experitionWrong) {
-                expiration = expiration + 1;
-            }
-            if (mintToWrong) {
-                mintTo = vm.addr(123);
-            }
-            if (randomBytesWrong) {
-                // randomly alter bytes (by flipping them)
-                randomBytes = _flipBytes(randomBytes);
-            }
-            if (pricePerTokenWrong) {
-                pricePerToken = pricePerToken + 1;
-            }
+        // now start messing with the data
+        if (signatureIssue == 2) {
+            tokenId = _setupTokenAndSignatureMinter(maxSupply);
+        } else if (signatureIssue == 3) {
+            pricePerToken = pricePerToken + 1;
+        } else if (signatureIssue == 4) {
+            quantity = quantity + 1;
+        } else if (signatureIssue == 5) {
+            expiration = expiration + 1;
+        } else if (signatureIssue == 6) {
+            mintTo = vm.addr(123);
+        } else if (signatureIssue == 7) {
+            // randomly alter bytes (by flipping them)
+            randomBytes = _flipBytes(randomBytes);
         }
 
         uint256 toSend = mintValue + mintFeeAmount * quantity;
