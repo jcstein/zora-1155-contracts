@@ -132,12 +132,10 @@ contract ZoraCreatorSignatureMinterStrategy is Enjoy, SaleStrategy, LimitedMintP
             mintRequestCalldata.signature
         );
 
-        // do we need this setting to be there for each token, or just be the same across the board?
         if (signer == address(0) || !isAuthorizedToSign(signer, target)) {
             revert InvalidSignature();
         }
 
-        // do we need this to be also unique per signer?
         if (minted[target][mintRequestCalldata.nonce]) {
             revert AlreadyMinted();
         }

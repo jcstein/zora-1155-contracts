@@ -407,9 +407,10 @@ contract ZoraSignatureMinterStategyTest is Test {
         target.mint{value: toSend}(signatureMinter, tokenId, quantity, minterArguments);
     }
 
-    function test_mint_revertsWhen_wrongValueSent(uint128 pricePerToken, bool increase) external {
-        uint64 quantity = 4;
-        uint64 maxSupply = 10;
+    function test_mint_revertsWhen_wrongValueSent(uint128 pricePerToken, uint64 quantity) external {
+        vm.assume(pricePerToken > 0 && pricePerToken < 1 ether && quantity > 0 && quantity < 1000);
+        uint256 wrongAmountToSend = pricePerToken * quantity + 1 ether;
+        uint64 maxSupply = quantity + 1;
 
         bytes32 randomBytes = bytes32(uint256(123123));
         address mintTo = vm.addr(123123123);
@@ -430,25 +431,15 @@ contract ZoraSignatureMinterStategyTest is Test {
             fundsRecipient
         );
 
-        (bytes memory minterArguments, , uint256 toSend) = _signMintRequestAndGetMintParams(callParams);
-
-        // alter value to send
-        toSend = increase ? toSend + 1 : toSend - 1;
+        (bytes memory minterArguments, , ) = _signMintRequestAndGetMintParams(callParams);
 
         address executorAddress = vm.addr(12314324123);
-        vm.deal(executorAddress, toSend);
+        uint256 mintFee = quantity * mintFeeAmount;
+        vm.deal(executorAddress, wrongAmountToSend + mintFee);
         vm.prank(executorAddress);
 
-        // should revert
-        if (increase) {
-            vm.expectRevert();
-            // having a hard time getting this exact error to happen, so for now doing a generic revert
-            // vm.expectRevert(abi.encodeWithSelector(ZoraSignatureMinterStrategy.WrongValueSent.selector, mintValue, toSend - mintValue));
-        } else {
-            // this will cause an underflow which is hard to catch, we need to fix that logic to raise a proper detecable then we can catch
-            vm.expectRevert();
-        }
-        target.mint{value: toSend}(signatureMinter, tokenId, quantity, minterArguments);
+        vm.expectRevert(abi.encodeWithSelector(ZoraCreatorSignatureMinterStrategy.WrongValueSent.selector, pricePerToken * quantity, wrongAmountToSend));
+        target.mint{value: wrongAmountToSend + mintFee}(signatureMinter, tokenId, quantity, minterArguments);
     }
 
     function test_mint_fundsRecipientRecievesFunds(uint64 pricePerToken, uint64 quantity, uint64 maxSupply) external {
