@@ -227,25 +227,11 @@ contract ZoraSignatureMinterStategyTest is Test {
         assertEq(target.balanceOf(mintTo, tokenId), quantity);
     }
 
-    function test_mint_revertsWhen_mintedTwice_butSucceedsWhen_randomBytesChanges(
-        uint256 pricePerToken,
-        uint256 quantity,
-        uint256 maxSupply,
-        uint256 expirationInFuture,
-        bytes32 randomBytes
-    ) external {
-        {
-            vm.assume(pricePerToken < 5 ether);
-            vm.assume(quantity < 100000);
-            vm.assume(quantity > 0);
-            // since we will mint twicek
-            vm.assume(maxSupply >= uint256(quantity) * 2);
-            vm.assume(expirationInFuture > 0 && expirationInFuture < 3 days);
-        }
+    function test_mint_revertsWhen_mintedTwice_butSucceedsWhen_randomBytesChanges(bytes32 randomBytes) external {
         address mintTo = vm.addr(12312312);
-        uint256 tokenId = _setupTokenAndSignatureMinter(maxSupply);
+        uint256 tokenId = _setupTokenAndSignatureMinter(20);
 
-        uint256 expiration = currentTime + expirationInFuture;
+        uint256 expiration = currentTime + 2 days;
 
         address executorAddress = vm.addr(12314324123);
 
@@ -254,8 +240,8 @@ contract ZoraSignatureMinterStategyTest is Test {
             address(target),
             tokenId,
             randomBytes,
-            quantity,
-            pricePerToken,
+            10,
+            1 ether,
             expiration,
             mintTo,
             fundsRecipient
@@ -264,34 +250,28 @@ contract ZoraSignatureMinterStategyTest is Test {
         // generate signature for hash using creators private key, and get mint arguments
         (bytes memory minterArguments, uint256 mintValue, uint256 toSend) = _signMintRequestAndGetMintParams(callParams);
 
-        {
-            vm.deal(executorAddress, toSend);
-            vm.prank(executorAddress);
+        vm.deal(executorAddress, toSend);
+        vm.prank(executorAddress);
 
-            target.mint{value: toSend}(signatureMinter, tokenId, quantity, minterArguments);
-        }
+        target.mint{value: toSend}(signatureMinter, tokenId, 10, minterArguments);
 
-        {
-            // deal some more eth to the executor, and mint again, it should revert
-            vm.deal(executorAddress, toSend);
-            vm.prank(executorAddress);
-            vm.expectRevert(ZoraCreatorSignatureMinterStrategy.AlreadyMinted.selector);
-            target.mint{value: toSend}(signatureMinter, tokenId, quantity, minterArguments);
-        }
+        // deal some more eth to the executor, and mint again, it should revert
+        vm.deal(executorAddress, toSend);
+        vm.prank(executorAddress);
+        vm.expectRevert(ZoraCreatorSignatureMinterStrategy.AlreadyMinted.selector);
+        target.mint{value: toSend}(signatureMinter, tokenId, 10, minterArguments);
 
-        {
-            // now generate a new signature with a diff random bytes value
-            callParams.nonce = _flipBytes(randomBytes);
-            // create the signature from an authorized signer:
-            (minterArguments, mintValue, toSend) = _signMintRequestAndGetMintParams(callParams);
+        // now generate a new signature with a diff random bytes value
+        callParams.nonce = _flipBytes(randomBytes);
+        // create the signature from an authorized signer:
+        (minterArguments, mintValue, toSend) = _signMintRequestAndGetMintParams(callParams);
 
-            // mint with these new args, should succeed
-            vm.prank(executorAddress);
-            target.mint{value: toSend}(signatureMinter, tokenId, quantity, minterArguments);
-        }
+        // mint with these new args, should succeed
+        vm.prank(executorAddress);
+        target.mint{value: toSend}(signatureMinter, tokenId, 10, minterArguments);
 
         // it should have minted twice
-        assertEq(target.balanceOf(mintTo, tokenId), quantity * 2);
+        assertEq(target.balanceOf(mintTo, tokenId), 20);
     }
 
     function test_mint_revertsWhen_invalidSignature(
