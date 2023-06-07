@@ -1,0 +1,23 @@
+{
+    "name": "Taro Testnet",
+    "chain": "TARO",
+    "rpc": [
+      "https://taro-testnet.calderachain.xyz/http"
+    ],
+    "faucets": [
+        "https://tarotestnet.com"
+    ],
+    "nativeCurrency": {
+      "name": "Ether",
+      "symbol": "ETH",
+      "decimals": 18
+    },
+    "infoURL": "https://tarotestnet.com",
+    "shortName": "eth",
+    "chainId": 1582,
+    "networkId": 1582,
+    "explorers": [{
+      "name": "Taro Testnet Explorer",
+      "url": "https://explorer.caldera.xyz"
+    }]
+  }
